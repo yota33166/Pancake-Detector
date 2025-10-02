@@ -16,7 +16,7 @@ class PancakeDetector:
         frame_height=240,
         fps=30
         ):
-        self.cap = self.initialize_camera(camera_index)
+        self.cap = self.init_camera(camera_index)
         if self.cap is None:
             print("カメラの初期化に失敗しました。")
             exit(1)
@@ -31,7 +31,13 @@ class PancakeDetector:
         # キャリブレーションデータの読み込み（存在する場合）
         self.cameraMatrix, self.distCoeffs, self.rvecs, self.tvecs = self.load_calibration(calibration_file)
 
-    def initialize_camera(self, camera_index):
+        # UI準備
+        self.window_name = 'PancakeDetector'
+        self.max_area = frame_width * frame_height
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        self.init_ui()
+
+    def init_camera(self, camera_index):
         """カメラを初期化"""
         cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
         if not cap.isOpened():
@@ -39,6 +45,41 @@ class PancakeDetector:
             return None
         return cap
     
+    def init_ui(self):
+        """HSV色域と最小面積を調整するトラックバーを作成"""
+        cv2.namedWindow('Controls', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Controls', 420, 240)
+        # 初期値
+        hL, sL, vL = int(self.LOWER_COLOR[0]), int(self.LOWER_COLOR[1]), int(self.LOWER_COLOR[2])
+        hU, sU, vU = int(self.UPPER_COLOR[0]), int(self.UPPER_COLOR[1]), int(self.UPPER_COLOR[2])
+        min_area = int(self.MIN_CONTOUR_AREA)
+
+        cv2.createTrackbar('H_lower',  'Controls', hL, 179, lambda v: None)
+        cv2.createTrackbar('H_upper', 'Controls', hU, 179, lambda v: None)
+        cv2.createTrackbar('S_lower',  'Controls', sL, 255, lambda v: None)
+        cv2.createTrackbar('S_upper', 'Controls', sU, 255, lambda v: None)
+        cv2.createTrackbar('V_lower',  'Controls', vL, 255, lambda v: None)
+        cv2.createTrackbar('V_upper', 'Controls', vU, 255, lambda v: None)
+        cv2.createTrackbar('MinArea','Controls', min_area, max(1, self.max_area), lambda v: None)
+
+    def update_params_from_trackbar(self):
+        """トラックバー値を読み取り、パラメータを更新"""
+        hL = cv2.getTrackbarPos('H_lower',  'Controls')
+        hU = cv2.getTrackbarPos('H_upper', 'Controls')
+        sL = cv2.getTrackbarPos('S_lower',  'Controls')
+        sU = cv2.getTrackbarPos('S_upper', 'Controls')
+        vL = cv2.getTrackbarPos('V_lower',  'Controls')
+        vU = cv2.getTrackbarPos('V_upper', 'Controls')
+        min_area = cv2.getTrackbarPos('MinArea', 'Controls')
+
+        hL, hU = sorted((hL, hU))
+        sL, sU = sorted((sL, sU))
+        vL, vU = sorted((vL, vU))
+
+        self.LOWER_COLOR = np.array([hL, sL, vL], dtype=np.uint8)
+        self.UPPER_COLOR = np.array([hU, sU, vU], dtype=np.uint8)
+        self.MIN_CONTOUR_AREA = int(max(0, min_area))
+
     def load_calibration(self, file_name):
         """カメラのキャリブレーションデータを読み込む"""
         try:
@@ -172,6 +213,8 @@ class PancakeDetector:
             except Exception as e:
                 print(e)
                 break
+
+            self.update_params_from_trackbar()
             mask, hsv_frame, contours = self.detect_contour(frame)
             # 検出した輪郭を描画
             for contour in contours:
@@ -201,9 +244,7 @@ class PancakeDetector:
                 self.draw_contour(frame, contour, center_x, center_y, avg_hsv)
 
             # 結果を表示
-
-            cv2.namedWindow('PancakeDetector', cv2.WINDOW_NORMAL)
-            cv2.imshow('PancakeDetector', frame)
+            cv2.imshow(self.window_name, frame)
             #cv2.imshow('Mask', mask)
             #cv2.imshow('Filtered', result)
     
