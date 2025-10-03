@@ -39,9 +39,17 @@ class PancakeDetector:
 
     def init_camera(self, camera_index):
         """カメラを初期化"""
-        cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(camera_index)
         if not cap.isOpened():
-            print('カメラが見つかりませんでした。')
+            print(f'カメラ{camera_index}が見つかりませんでした。')
+            video_devices = glob.glob('/dev/video*')
+            for device in video_devices:
+                print(f"試行中のデバイス: {device}")
+                cap = cv2.VideoCapture(device)
+                if cap.isOpened():
+                    print(f"カメラが見つかりました: {device}")
+                    return cap
+            print("カメラが見つかりませんでした。")
             return None
         return cap
     
