@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import glob
 
+from serial_handler import SerialHandler
+
 class PancakeDetector:
     LOWER_COLOR = np.array([10, 50, 50])  # 黄褐色の下限値 (HSV)
     UPPER_COLOR = np.array([40, 255, 255])  # 黄褐色の上限値 (HSV)
@@ -14,8 +16,12 @@ class PancakeDetector:
         calibration_file="calibration.npz",
         frame_width=320,
         frame_height=240,
-        fps=30
+        fps=30,
+        serial_port=None,
+        baudrate=115200,
+        timeout=1
         ):
+
         self.cap = self.init_camera(camera_index)
         if self.cap is None:
             print("カメラの初期化に失敗しました。")
@@ -36,6 +42,15 @@ class PancakeDetector:
         self.max_area = frame_width * frame_height
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         self.init_ui()
+
+        # シリアル通信の初期化（必要なら）
+        if serial_port:
+            try:
+                self.serial = SerialHandler(port=serial_port, baudrate=baudrate, timeout=timeout)
+                self.serial.start_listening(lambda line: print(f"[Pico] {line}"))
+            except Exception as e:
+                print(f"シリアル通信の初期化に失敗しました: {e}")
+                self.serial = None
 
     def init_camera(self, camera_index):
         """カメラを初期化"""
@@ -251,6 +266,10 @@ class PancakeDetector:
 
                 self.draw_contour(frame, contour, center_x, center_y, avg_hsv)
 
+                # シリアル通信で座標を送信
+                if self.serial:
+                    self.serial.send(f"({real_center_x:.3f}, {real_center_y:.3f})")
+
             # 結果を表示
             cv2.imshow(self.window_name, frame)
             #cv2.imshow('Mask', mask)
@@ -263,8 +282,11 @@ class PancakeDetector:
         if self.cap.isOpened():
             self.cap.release()
 
+        if self.serial:
+            self.serial.close()
+
         cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    detector = PancakeDetector(0)
+    detector = PancakeDetector(camera_index=0, serial_port="COM3")
     detector.run()
