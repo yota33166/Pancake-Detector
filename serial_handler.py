@@ -10,6 +10,11 @@ class SerialHandler:
         self.thread: threading.Thread = None
         self.callback: callable = None
 
+    @staticmethod
+    def list_ports():
+        """利用可能なシリアルポート一覧を返す"""
+        return [(p.device, p.description) for p in serial.tools.list_ports.comports()]
+
     def send(self, data: str):
         """Picoに文字列を送信"""
         if self.ser.is_open:
