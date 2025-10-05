@@ -28,6 +28,8 @@ class SerialHandler:
                 line = self.ser.readline().decode("utf-8").rstrip()
                 if self.callback:
                     self.callback(line)
+            else:
+                time.sleep(0.01)  # ポーリング間隔を抑制
                     
     def stop(self):
         """受信スレッドを止める"""
@@ -55,8 +57,6 @@ if __name__ == "__main__":
             user_input = input("Send to Pico (or 'exit' to quit): ")
             if user_input.lower() == 'exit':
                 break
-            else:
-                time.sleep(0.01)  # ポーリング間隔を抑制
             serial_handler.send(user_input)
     except KeyboardInterrupt:
         pass
