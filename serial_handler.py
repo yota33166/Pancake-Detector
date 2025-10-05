@@ -13,7 +13,7 @@ class SerialHandler:
     def send(self, data: str):
         """Picoに文字列を送信"""
         if self.ser.is_open:
-            self.ser.write((data + "\n").encode("utf-8"))
+            self.ser.write((data + "\r\n").encode("utf-8"))
 
     def start_listening(self, callback):
         """受信を別スレッドで待ち受け。callback関数に受信文字列を渡す"""
