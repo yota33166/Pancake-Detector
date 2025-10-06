@@ -66,8 +66,41 @@ class PancakeDetector:
                     return cap
             print("カメラが見つかりませんでした。")
             return None
+
+        self.configure_focus(cap)
         return cap
     
+    def configure_focus(self, cap, autofocus=False, focus_value=100):
+        """オートフォーカスを制御"""
+        try:
+            if autofocus is False:
+                success = cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                if not success:
+                    print("警告: CAP_PROP_AUTOFOCUSでオートフォーカスを無効化できませんでした。")
+                else:
+                    print("オートフォーカスを無効にしました。")
+            elif autofocus is True:
+                cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
+            if focus_value is not None:
+                if not 0 <= focus_value <= 255:
+                    print("警告: focus_value は 0〜255 の範囲で指定してください。")
+                else:
+                    success = cap.set(cv2.CAP_PROP_FOCUS, float(focus_value))
+                    if not success:
+                        print("警告: CAP_PROP_FOCUS で手動フォーカス値を設定できませんでした。")
+                    else:
+                        print(f"フォーカス値を {focus_value} に設定しました。")
+            
+            # success = cap.set(cv2.CAP_PROP_EXPOSURE, 0.25)
+            if not success:
+                print("警告: CAP_PROP_EXPOSURE で露出を設定できませんでした。")
+            else:
+                print("露出を 0.25 に設定しました。")
+                
+        except Exception as e:
+            print(f"フォーカス設定中にエラーが発生しました: {e}")
+
     def init_ui(self):
         """HSV色域と最小面積を調整するトラックバーを作成"""
         cv2.namedWindow('Controls', cv2.WINDOW_NORMAL)
