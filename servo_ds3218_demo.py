@@ -16,7 +16,7 @@ import sys
 import time
 
 from gpiozero import AngularServo
-from gpiozero.pins.pigpio import PiGPIOFactory
+from gpiozero.pins.lgpio import LGPIOFactory
 # Hardware configuration -----------------------------------------------------
 PWM_PIN = 13  # BCM numbering
 MIN_PULSE_WIDTH_S = 500 / 1_000_000  # 500 µs
@@ -29,7 +29,7 @@ NEUTRAL_ANGLE = 90
 def build_servo() -> AngularServo:
     """Create an AngularServo configured for the DS3218 using pigpio."""
 
-    factory = PiGPIOFactory()
+    factory = LGPIOFactory()
     return AngularServo(
         PWM_PIN,
         min_angle=0,
