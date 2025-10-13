@@ -20,7 +20,7 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Dict, Optional
 
 from gpiozero import AngularServo, Button, LED  # type: ignore[misc]
 
@@ -63,24 +63,37 @@ STEP_DELAY_S = 0.005
 
 
 @dataclass
-class ServoState:
-	"""Keeps track of a servo device and current angle."""
+class ServoConfig:
+	"""Keeps track of a servo device and current angle.
+	Parameters:
+		servo: The gpiozero AngularServo instance.
+		id: The unique identifier for the servo.
+		pin: The GPIO pin number the servo is attached to.
+		start_angle: The angle representing the "start" position.
+		end_angle: The angle representing the "end" position.
+		current_angle: The last known angle of the servo.
+	"""
 
-	servo: Any
+	servo: AngularServo
+	id: str
+	pin: int
+	start_angle: int
+	end_angle: int
 	current_angle: int
 
 
-servo1_state: Optional[ServoState] = None
-servo2_state: Optional[ServoState] = None
 
-button1: Optional[Any] = None
-button2: Optional[Any] = None
-button3: Optional[Any] = None
-button4: Optional[Any] = None
-led: Optional[Any] = None
+button1: Optional[Button] = None
+button2: Optional[Button] = None
+button3: Optional[Button] = None
+button4: Optional[Button] = None
+led: Optional[LED] = None
 
 is_on: bool = False
 press_start_time: Optional[float] = None
+
+# Mantains the live servo objects keyed by their logical identifiers.
+servo_states: Dict[str, ServoConfig] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +115,7 @@ def setup_logging() -> None:
 def setup_devices() -> None:
 	"""Initialise gpiozero devices for servos, buttons, and LED."""
 
-	global servo1_state, servo2_state
-	global button1, button2, button3, button4, led
+	global button1, button2, button3, button4, led, servo_states
 
 	button1 = Button(BUTTON_PIN1, pull_up=True)
 	button2 = Button(BUTTON_PIN2, pull_up=True)
@@ -113,8 +125,26 @@ def setup_devices() -> None:
 	led = LED(LED_PIN)
 	led.off()
 
-	servo1_state = setup_servo(SERVO_PIN1, START_ANGLE1)
-	servo2_state = setup_servo(SERVO_PIN2, START_ANGLE2)
+
+	servo_states = {
+		cfg.id: cfg
+		for cfg in (
+			setup_servo(
+				id="left",
+				pin=SERVO_PIN1,
+				start_angle=START_ANGLE1,
+				end_angle=END_ANGLE1,
+				current_angle=START_ANGLE1,
+			),
+			setup_servo(
+				id="right",
+				pin=SERVO_PIN2,
+				start_angle=START_ANGLE2,
+				end_angle=END_ANGLE2,
+				current_angle=START_ANGLE2,
+			),
+		)
+	}
 
 
 def angle_to_duty_cycle(angle: int) -> float:
@@ -133,8 +163,13 @@ def clamp(value: int, lower: int, upper: int) -> int:
 	return max(lower, min(upper, value))
 
 
-def setup_servo(pin: int, initial_angle: int) -> ServoState:
-	"""Create and start an angular servo at *initial_angle*."""
+def setup_servo(
+		id: str,
+		pin: int,
+		start_angle: int,
+		end_angle: int,
+		current_angle: int) -> ServoConfig:
+	"""Create and start an angular servo at *start_angle*."""
 
 	servo = AngularServo(
 		pin,
@@ -142,10 +177,12 @@ def setup_servo(pin: int, initial_angle: int) -> ServoState:
 		max_angle=MAX_ANGLE,
 		min_pulse_width=SERVO_MIN_PULSE_US / 1_000_000.0,
 		max_pulse_width=SERVO_MAX_PULSE_US / 1_000_000.0,
-		initial_angle=clamp(initial_angle, 0, MAX_ANGLE),
+		initial_angle=clamp(start_angle, 0, MAX_ANGLE),
 	)
-	logging.debug("Servo on pin %d initialised at %d°", pin, initial_angle)
-	return ServoState(servo=servo, current_angle=servo.angle or initial_angle)
+	logging.debug("Servo on pin %d initialised at %d°", pin, start_angle)
+	return ServoConfig(
+		servo=servo, id=id, pin=pin, start_angle=start_angle, end_angle=end_angle, current_angle=current_angle
+	)
 
 
 def cleanup() -> None:
@@ -153,16 +190,13 @@ def cleanup() -> None:
 
 	logging.debug("Cleaning up gpiozero devices")
 
-	global servo1_state, servo2_state
-	global button1, button2, button3, button4, led
+	global button1, button2, button3, button4, led, servo_states
 
-	for state in (servo1_state, servo2_state):
-		if state is not None:
-			state.servo.detach()
-			state.servo.close()
+	for state in servo_states.values():
+		state.servo.detach()
+		state.servo.close()
 
-	servo1_state = None
-	servo2_state = None
+	servo_states.clear()
 
 	if led is not None:
 		led.off()
@@ -189,33 +223,35 @@ def set_led(on: bool) -> None:
 	logging.debug("LED %s", "ON" if on else "OFF")
 
 
-def is_button_pressed(btn: Optional[Any]) -> bool:
+def is_button_pressed(btn: Optional[Button]) -> bool:
 	"""Return True if the button is currently pressed."""
 
-	return bool(btn and btn.is_pressed)
+	return bool(btn and btn.is_active)
 
 
-def wait_for_button_release(btn: Optional[Any]) -> None:
+def wait_for_button_release(btn: Optional[Button]) -> None:
 	"""Block until the button transitions to the released state."""
 
 	if btn is None:
 		return
 
-	btn.wait_for_release()
+	btn.wait_for_inactive()
 
 
 def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 	"""Move both servos smoothly to the supplied target angles."""
 
-	global servo1_state, servo2_state
+	left_state = servo_states.get("left")
+	right_state = servo_states.get("right")
 
-	assert servo1_state is not None and servo2_state is not None, "Servos not initialised"
+	if left_state is None or right_state is None:
+		raise RuntimeError("Servos not initialised")
 
 	target1 = clamp(angle1, 0, MAX_ANGLE)
 	target2 = clamp(angle2, 0, MAX_ANGLE)
 
-	current1 = servo1_state.current_angle
-	current2 = servo2_state.current_angle
+	current1 = left_state.current_angle
+	current2 = right_state.current_angle
 
 	step1 = 0 if target1 == current1 else (1 if target1 > current1 else -1)
 	step2 = 0 if target2 == current2 else (1 if target2 > current2 else -1)
@@ -236,21 +272,21 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 	for step in range(total_steps):
 		if step < steps1:
 			current1 += step1
-			servo1_state.current_angle = current1
-			servo1_state.servo.angle = current1
+			left_state.current_angle = current1
+			left_state.servo.angle = current1
 
 		if step < steps2:
 			current2 += step2
-			servo2_state.current_angle = current2
-			servo2_state.servo.angle = current2
+			right_state.current_angle = current2
+			right_state.servo.angle = current2
 
 		time.sleep(STEP_DELAY_S)
 
 	# Ensure we finish exactly on the targets.
-	servo1_state.current_angle = target1
-	servo2_state.current_angle = target2
-	servo1_state.servo.angle = target1
-	servo2_state.servo.angle = target2
+	left_state.current_angle = target1
+	right_state.current_angle = target2
+	left_state.servo.angle = target1
+	right_state.servo.angle = target2
 
 	time.sleep(max(interval_ms, 0) / 1000.0)
 
