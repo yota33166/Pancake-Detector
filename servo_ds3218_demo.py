@@ -27,7 +27,7 @@ NEUTRAL_ANGLE = 90
 
 
 def build_servo() -> AngularServo:
-    """Create an AngularServo configured for the DS3218 using pigpio."""
+    """Create an AngularServo configured for the DS3218 using gpiozero."""
 
     factory = LGPIOFactory()
     return AngularServo(
