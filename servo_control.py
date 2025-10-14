@@ -31,13 +31,13 @@ from gpiozero import AngularServo, Button, LED  # type: ignore[misc]
 
 DEBUG = True
 
-SERVO_PIN1 = 5  # Left servo (BCM numbering)
-SERVO_PIN2 = 6  # Right servo (BCM numbering)
+SERVO_PIN1 = 12  # Left servo (hardware PWM0, channel A)
+SERVO_PIN2 = 13  # Right servo (hardware PWM01 channel B)
 
-BUTTON_PIN1 = 10
-BUTTON_PIN2 = 11
-BUTTON_PIN3 = 8
-BUTTON_PIN4 = 9
+BUTTON_PIN1 = 17
+BUTTON_PIN2 = 27
+BUTTON_PIN3 = 22
+BUTTON_PIN4 = 23
 
 LED_PIN = 13  # On-board LED (BCM numbering)
 
@@ -49,7 +49,7 @@ END_ANGLE1 = 80
 START_ANGLE2 = MAX_ANGLE - 20
 END_ANGLE2 = MAX_ANGLE - 80
 
-PWM_FREQUENCY = 50  # Hertz (20 ms period)
+PWM_FREQUENCY = 50  # Hertz (spec range 50-330 Hz)
 SERVO_MIN_PULSE_US = 500
 SERVO_MAX_PULSE_US = 2500
 
@@ -126,6 +126,7 @@ def setup_devices() -> None:
 	led.off()
 
 
+	# IDをキーとしてServoConfigの辞書を作成
 	servo_states = {
 		cfg.id: cfg
 		for cfg in (
@@ -153,7 +154,8 @@ def angle_to_duty_cycle(angle: int) -> float:
 	angle = clamp(angle, 0, MAX_ANGLE)
 	pulse_span = SERVO_MAX_PULSE_US - SERVO_MIN_PULSE_US
 	pulse = SERVO_MIN_PULSE_US + (pulse_span * angle / MAX_ANGLE)
-	duty_cycle = (pulse / 20000.0) * 100.0  # 20 ms period
+	period_us = 1_000_000.0 / PWM_FREQUENCY
+	duty_cycle = (pulse / period_us) * 100.0
 	return duty_cycle
 
 
@@ -253,6 +255,7 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 	current1 = left_state.current_angle
 	current2 = right_state.current_angle
 
+	# Determine the step direction and number of steps needed for each servo.
 	step1 = 0 if target1 == current1 else (1 if target1 > current1 else -1)
 	step2 = 0 if target2 == current2 else (1 if target2 > current2 else -1)
 
