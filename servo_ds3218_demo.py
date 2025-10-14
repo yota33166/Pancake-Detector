@@ -5,8 +5,9 @@ executed on a Raspberry Pi with the pigpiod daemon running::
 
     sudo systemctl start pigpiod  # or: sudo pigpiod
 
-Once running, the script will sweep the servo across its full travel and then
-hold a neutral position. Press Ctrl+C to exit cleanly.
+Once running, the script parks the servo at neutral and waits for a momentary
+button on GPIO 4 to be pressed; each press triggers a single sweep across the
+full travel before returning to neutral. Press Ctrl+C to exit cleanly.
 """
 
 from __future__ import annotations
@@ -15,10 +16,11 @@ import signal
 import sys
 import time
 
-from gpiozero import AngularServo
+from gpiozero import AngularServo, Button
 from gpiozero.pins.lgpio import LGPIOFactory
 # Hardware configuration -----------------------------------------------------
 PWM_PIN = 13  # BCM numbering
+BUTTON_PIN = 17
 MIN_PULSE_WIDTH_S = 500 / 1_000_000  # 500 µs
 MAX_PULSE_WIDTH_S = 2_500 / 1_000_000  # 2500 µs
 SWEEP_STEP_DEGREES = 5
@@ -55,10 +57,12 @@ def sweep_once(servo: AngularServo) -> None:
 
 def main() -> None:
     servo = build_servo()
+    button = Button(BUTTON_PIN, pull_up=True)
 
     def _handle_signal(signum, frame):  # pragma: no cover - signal handler
         servo.detach()
         servo.close()
+        button.close()
         sys.exit(0)
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -66,14 +70,16 @@ def main() -> None:
 
     try:
         while True:
+            button.wait_for_press()
             sweep_once(servo)
             servo.angle = NEUTRAL_ANGLE
-            time.sleep(1.0)
+            button.wait_for_release()
     except KeyboardInterrupt:
         pass
     finally:
         servo.detach()
         servo.close()
+        button.close()
 
 
 if __name__ == "__main__":
