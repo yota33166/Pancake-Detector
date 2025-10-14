@@ -57,7 +57,7 @@ def sweep_once(servo: AngularServo) -> None:
 
 def main() -> None:
     servo = build_servo()
-    button = Button(BUTTON_PIN, pull_up=True)
+    button: Button = Button(BUTTON_PIN, pull_up=True)
 
     def _handle_signal(signum, frame):  # pragma: no cover - signal handler
         servo.detach()
@@ -70,10 +70,10 @@ def main() -> None:
 
     try:
         while True:
-            button.wait_for_press()
+            button.wait_for_active()
             sweep_once(servo)
             servo.angle = NEUTRAL_ANGLE
-            button.wait_for_release()
+            button.wait_for_inactive()
     except KeyboardInterrupt:
         pass
     finally:

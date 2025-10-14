@@ -354,6 +354,9 @@ def loop() -> None:
 		button2_state = is_button_pressed(button2)
 		button3_state = is_button_pressed(button3)
 		button4_state = is_button_pressed(button4)
+		# 全てのサーボを停止
+		for state in servo_states.values():
+			state.servo.detach()
 
 		if button2_state:
 			time.sleep(DEBOUNCE_DELAY_S)
