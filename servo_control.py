@@ -39,7 +39,8 @@ BUTTON_PIN2 = 27
 BUTTON_PIN3 = 22
 BUTTON_PIN4 = 23
 
-LED_PIN = 13  # On-board LED (BCM numbering)
+# LED_PIN = 13  # On-board LED (BCM numbering)
+led = None
 
 ROTATE_DELAY_MS = 20
 POURING_TIME_MS = 1000
@@ -122,8 +123,8 @@ def setup_devices() -> None:
 	button3 = Button(BUTTON_PIN3, pull_up=True)
 	button4 = Button(BUTTON_PIN4, pull_up=True)
 
-	led = LED(LED_PIN)
-	led.off()
+	# led = LED(LED_PIN)
+	# led.off()
 
 
 	# IDをキーとしてServoConfigの辞書を作成
