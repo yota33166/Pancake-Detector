@@ -81,6 +81,7 @@ class ServoConfig:
 	start_angle: int
 	end_angle: int
 	current_angle: int
+	is_reversed: bool = True
 
 
 
@@ -137,6 +138,7 @@ def setup_devices() -> None:
 				start_angle=START_ANGLE1,
 				end_angle=END_ANGLE1,
 				current_angle=START_ANGLE1,
+				is_reversed=True,
 			),
 			setup_servo(
 				id="right",
@@ -144,10 +146,16 @@ def setup_devices() -> None:
 				start_angle=START_ANGLE2,
 				end_angle=END_ANGLE2,
 				current_angle=START_ANGLE2,
+				is_reversed=True,
 			),
 		)
 	}
 
+def _apply_angle(state: ServoConfig, logical_angle: int) -> None:
+    physical = logical_angle
+    if state.is_reversed:
+        physical = MAX_ANGLE - logical_angle
+    state.servo.angle = physical
 
 def angle_to_duty_cycle(angle: int) -> float:
 	"""Convert an angle in degrees to the corresponding PWM duty cycle."""
@@ -171,18 +179,23 @@ def setup_servo(
 		pin: int,
 		start_angle: int,
 		end_angle: int,
-		current_angle: int) -> ServoConfig:
+		current_angle: int,
+		is_reversed: bool = True
+		) -> ServoConfig:
 	"""Create and start an angular servo at *start_angle*."""
 
+	initial_angle = clamp(start_angle, 0, MAX_ANGLE)
+	if is_reversed:
+		initial_angle = MAX_ANGLE - initial_angle
 	servo = AngularServo(
 		pin,
 		min_angle=0,
 		max_angle=MAX_ANGLE,
 		min_pulse_width=SERVO_MIN_PULSE_US / 1_000_000.0,
 		max_pulse_width=SERVO_MAX_PULSE_US / 1_000_000.0,
-		initial_angle=clamp(start_angle, 0, MAX_ANGLE),
+		initial_angle=initial_angle,
 	)
-	logging.debug("Servo on pin %d initialised at %d°", pin, start_angle)
+	logging.debug("Servo on pin %d initialised at %d°", pin, initial_angle)
 	return ServoConfig(
 		servo=servo, id=id, pin=pin, start_angle=start_angle, end_angle=end_angle, current_angle=current_angle
 	)
@@ -279,20 +292,20 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 			if step < steps1:
 				current1 += step1
 				left_state.current_angle = current1
-				left_state.servo.angle = current1
+				_apply_angle(left_state, current1)
 
 			if step < steps2:
 				current2 += step2
 				right_state.current_angle = current2
-				right_state.servo.angle = current2
+				_apply_angle(right_state, current2)
 
 			time.sleep(STEP_DELAY_S)
 
 		# Ensure we finish exactly on the targets.
 		left_state.current_angle = target1
 		right_state.current_angle = target2
-		left_state.servo.angle = target1
-		right_state.servo.angle = target2
+		_apply_angle(left_state, target1)
+		_apply_angle(right_state, target2)
 
 		time.sleep(max(interval_ms, 0) / 1000.0)
 	finally:
