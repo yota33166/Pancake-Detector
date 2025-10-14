@@ -273,26 +273,31 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 		total_steps,
 	)
 
-	for step in range(total_steps):
-		if step < steps1:
-			current1 += step1
-			left_state.current_angle = current1
-			left_state.servo.angle = current1
 
-		if step < steps2:
-			current2 += step2
-			right_state.current_angle = current2
-			right_state.servo.angle = current2
+	try:
+		for step in range(total_steps):
+			if step < steps1:
+				current1 += step1
+				left_state.current_angle = current1
+				left_state.servo.angle = current1
 
-		time.sleep(STEP_DELAY_S)
+			if step < steps2:
+				current2 += step2
+				right_state.current_angle = current2
+				right_state.servo.angle = current2
 
-	# Ensure we finish exactly on the targets.
-	left_state.current_angle = target1
-	right_state.current_angle = target2
-	left_state.servo.angle = target1
-	right_state.servo.angle = target2
+			time.sleep(STEP_DELAY_S)
 
-	time.sleep(max(interval_ms, 0) / 1000.0)
+		# Ensure we finish exactly on the targets.
+		left_state.current_angle = target1
+		right_state.current_angle = target2
+		left_state.servo.angle = target1
+		right_state.servo.angle = target2
+
+		time.sleep(max(interval_ms, 0) / 1000.0)
+	finally:
+		left_state.servo.detach()
+		right_state.servo.detach()
 
 
 def pour_auto(button1_pressed: bool) -> None:
@@ -354,9 +359,6 @@ def loop() -> None:
 		button2_state = is_button_pressed(button2)
 		button3_state = is_button_pressed(button3)
 		button4_state = is_button_pressed(button4)
-		# 全てのサーボを停止
-		for state in servo_states.values():
-			state.servo.detach()
 
 		if button2_state:
 			time.sleep(DEBOUNCE_DELAY_S)
