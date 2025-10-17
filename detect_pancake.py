@@ -25,7 +25,8 @@ class PancakeDetector:
         timeout=1,
         command_queue=None,
         trigger_region: Optional[Tuple[int, int, int, int]] = None,
-        trigger_cooldown_s: float = 1.0,
+        trigger_cooldown_s: float = 1.0, # 生地注ぎのクールダウン時間
+        release_delay_s: float = 0.5, # 最低注ぎ継続時間
         ):
 
         self.cap = self.init_camera(camera_index)
@@ -61,7 +62,10 @@ class PancakeDetector:
         self.command_queue = command_queue
         self.trigger_region = trigger_region
         self.trigger_cooldown_s = max(0.0, trigger_cooldown_s)
+        self.release_delay_s = max(0.0, release_delay_s)
         self._last_trigger_ts = 0.0
+        self._last_seen_ts = 0.0
+        self._pour_active = False
 
     def init_camera(self, camera_index):
         """カメラを初期化"""
@@ -218,36 +222,58 @@ class PancakeDetector:
         return mask, hsv_frame, contours
 
 
-    def _should_trigger(self, center_x: int, center_y: int) -> bool:
+    def _is_within_trigger_region(self, center_x: int, center_y: int) -> bool:
+        """指定された座標がトリガー領域内にあるか確認"""
         if self.trigger_region is None:
             return False
         x_min, x_max, y_min, y_max = self.trigger_region
         return x_min <= center_x <= x_max and y_min <= center_y <= y_max
 
 
-    def maybe_send_trigger(self, center_x: int, center_y: int, area: float) -> None:
+    def _send_command(self, command: str, **payload) -> None:
+        """コマンドをキューに送信"""
+        # キューがない場合は何もしない
         if self.command_queue is None:
             return
 
+        message = {"type": command, "timestamp": time.time(), **payload}
+        try:
+            self.command_queue.put_nowait(message)
+            print(f"[Detector] Enqueued {command}: {payload}")
+        except Exception as exc:
+            print(f"キューへの送信に失敗しました: {exc}")
+
+
+    def maybe_send_start(self, center_x: int, center_y: int, area: float) -> None:
+        """検出があった場合に開始コマンドを送信"""
         now = time.time()
+        self._last_seen_ts = now
+
+        # キューがない、または注ぎ中であれば何もしない
+        if self.command_queue is None or self._pour_active:
+            return
+
+        # 直近のトリガーからクールダウン時間が経過していなければ何もしない
         if now - self._last_trigger_ts < self.trigger_cooldown_s:
             return
 
-        if not self._should_trigger(center_x, center_y):
+        self._send_command("start_pour", center=(center_x, center_y), area=area)
+        self._pour_active = True
+        self._last_trigger_ts = now
+
+
+    def maybe_send_stop(self, now: float) -> None:
+        """検出が途絶えた場合に停止コマンドを送信"""
+        # キューがない、または注ぎ中でない場合は何もしない
+        if self.command_queue is None or not self._pour_active:
             return
 
-        message = {
-            "type": "trigger_pour",
-            "center": (center_x, center_y),
-            "area": area,
-            "timestamp": now,
-        }
-        try:
-            self.command_queue.put_nowait(message)
-            self._last_trigger_ts = now
-            print(f"[Detector] Trigger enqueued: {message}")
-        except Exception as exc:
-            print(f"キューへの送信に失敗しました: {exc}")
+        # リリース遅延時間内であれば何もしない
+        if now - self._last_seen_ts < self.release_delay_s:
+            return
+
+        self._send_command("stop_pour")
+        self._pour_active = False
 
 
     def convert_to_real_coordinates(self, pixel_coords):
@@ -347,7 +373,12 @@ class PancakeDetector:
                 if self.serial:
                     self.serial.send(f"({real_center_x:.3f}, {real_center_y:.3f})")
 
-                self.maybe_send_trigger(center_x, center_y, area)
+                if self._is_within_trigger_region(center_x, center_y):
+                    # トリガー領域内であれば開始コマンドをキューに送信
+                    self.maybe_send_start(center_x, center_y, area)
+
+            # 検出が途絶えた場合に停止コマンドをキューに送信
+            self.maybe_send_stop(time.time())
 
             # 結果を表示
             cv2.imshow(self.window_name, frame)
@@ -360,6 +391,10 @@ class PancakeDetector:
 
         if self.cap.isOpened():
             self.cap.release()
+
+        if self.command_queue and self._pour_active:
+            self._send_command("stop_pour", reason="shutdown")
+            self._pour_active = False
 
         if self.serial:
             self.serial.close()
