@@ -27,13 +27,13 @@ from gpiozero import AngularServo, Button, LED  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
-# Configuration constants (mirroring the Arduino sketch)
+# 定数の定義
 # ---------------------------------------------------------------------------
 
 DEBUG = True
 
-SERVO_PIN1 = 12  # Left servo (hardware PWM0, channel A)
-SERVO_PIN2 = 13  # Right servo (hardware PWM01 channel B)
+SERVO_PIN1 = 12  # 左サーボ (hardware PWM0)
+SERVO_PIN2 = 13  # 右サーボ (hardware PWM1)
 
 BUTTON_PIN1 = 17
 BUTTON_PIN2 = 27
@@ -60,20 +60,20 @@ STEP_DELAY_S = 0.005
 
 
 # ---------------------------------------------------------------------------
-# Module level state
+# モジュールレベルの状態
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class ServoConfig:
-	"""Keeps track of a servo device and current angle.
+	"""サーボの設定と状態を保持する。
 	Parameters:
-		servo: The gpiozero AngularServo instance.
-		id: The unique identifier for the servo.
-		pin: The GPIO pin number the servo is attached to.
-		start_angle: The angle representing the "start" position.
-		end_angle: The angle representing the "end" position.
-		current_angle: The last known angle of the servo.
+		servo: gpiozeroのAngularServoインスタンス。
+		id: サーボの一意の識別子。(left, rightなど)
+		pin: サーボが接続されているGPIOピン番号。
+		start_angle: 回転の"開始"位置を表す角度。
+		end_angle: 回転の"終了"位置を表す角度。
+		current_angle: サーボの最後の角度。
 	"""
 
 	servo: AngularServo
@@ -95,17 +95,18 @@ led: Optional[LED] = None
 is_on: bool = False
 press_start_time: Optional[float] = None
 
-# Mantains the live servo objects keyed by their logical identifiers.
+# キー付けされたサーボオブジェクトを保持
 servo_states: Dict[str, ServoConfig] = {}
+detector_hold_active: bool = False
 
 
 # ---------------------------------------------------------------------------
-# Utility helpers
+# ユーティリティ
 # ---------------------------------------------------------------------------
 
 
 def setup_logging() -> None:
-	"""Configure logging based on the debug flag."""
+	"""ログの設定を行う"""
 
 	level = logging.DEBUG if DEBUG else logging.INFO
 	logging.basicConfig(
@@ -116,7 +117,7 @@ def setup_logging() -> None:
 
 
 def setup_devices() -> None:
-	"""Initialise gpiozero devices for servos, buttons, and LED."""
+	"""サーボ，ボタン，LEDの初期化を行う．"""
 
 	global button1, button2, button3, button4, led, servo_states
 
@@ -152,24 +153,26 @@ def setup_devices() -> None:
 
 
 def _apply_angle(state: ServoConfig, logical_angle: int) -> None:
-    physical = logical_angle
-    if state.is_reversed:
-        physical = MAX_ANGLE - logical_angle
-    state.servo.angle = physical
+	"""論理角度を物理角度に変換してサーボに適用する。is_reversed=Trueの場合は反転する。"""
+	physical = logical_angle
+	if state.is_reversed:
+		physical = MAX_ANGLE - logical_angle
+	state.servo.angle = physical
 
-def angle_to_duty_cycle(angle: int) -> float:
-	"""Convert an angle in degrees to the corresponding PWM duty cycle."""
 
-	angle = clamp(angle, 0, MAX_ANGLE)
-	pulse_span = SERVO_MAX_PULSE_US - SERVO_MIN_PULSE_US
-	pulse = SERVO_MIN_PULSE_US + (pulse_span * angle / MAX_ANGLE)
-	period_us = 1_000_000.0 / PWM_FREQUENCY
-	duty_cycle = (pulse / period_us) * 100.0
-	return duty_cycle
+# def angle_to_duty_cycle(angle: int) -> float:
+# 	"""degree単位の角度を対応するPWMデューティサイクルに変換する。"""
+
+# 	angle = clamp(angle, 0, MAX_ANGLE)
+# 	pulse_span = SERVO_MAX_PULSE_US - SERVO_MIN_PULSE_US
+# 	pulse = SERVO_MIN_PULSE_US + (pulse_span * angle / MAX_ANGLE)
+# 	period_us = 1_000_000.0 / PWM_FREQUENCY
+# 	duty_cycle = (pulse / period_us) * 100.0
+# 	return duty_cycle
 
 
 def clamp(value: int, lower: int, upper: int) -> int:
-	"""Clamp *value* to the inclusive range [lower, upper]."""
+	"""最小値と最大値の範囲にvalueをクランプする。"""
 
 	return max(lower, min(upper, value))
 
@@ -181,7 +184,7 @@ def setup_servo(
 		end_angle: int,
 		is_reversed: bool = True
 		) -> ServoConfig:
-	"""Create and start an angular servo at *start_angle*."""
+	"""初期化されたサーボオブジェクトを作成し、ServoConfigを返す。"""
 
 	initial_angle = clamp(start_angle, 0, MAX_ANGLE)
 	if is_reversed:
@@ -202,11 +205,11 @@ def setup_servo(
 
 
 def cleanup() -> None:
-	"""Stop servo outputs and release gpiozero resources."""
+	"""サーボ，ボタン，LEDのクリーンアップを行う．"""
 
 	logging.debug("Cleaning up gpiozero devices")
 
-	global button1, button2, button3, button4, led, servo_states
+	global button1, button2, button3, button4, led, servo_states, detector_hold_active
 
 	for state in servo_states.values():
 		state.servo.detach()
@@ -225,9 +228,11 @@ def cleanup() -> None:
 			btn.close()
 			globals()[btn_name] = None
 
+	detector_hold_active = False
+
 
 def set_led(on: bool) -> None:
-	"""Set the LED to the desired state."""
+	"""LEDの状態を設定する。"""
 
 	if led is None:
 		return
@@ -239,23 +244,23 @@ def set_led(on: bool) -> None:
 	logging.debug("LED %s", "ON" if on else "OFF")
 
 
-def is_button_pressed(btn: Optional[Button]) -> bool:
-	"""Return True if the button is currently pressed."""
+# def is_button_pressed(btn: Optional[Button]) -> bool:
+# 	"""ボタンが現在押されているかどうかを返す。"""
 
-	return bool(btn and btn.is_active)
+# 	return bool(btn and btn.is_active)
 
 
-def wait_for_button_release(btn: Optional[Button]) -> None:
-	"""Block until the button transitions to the released state."""
+# def wait_for_button_release(btn: Optional[Button]) -> None:
+# 	"""Block until the button transitions to the released state."""
 
-	if btn is None:
-		return
+# 	if btn is None:
+# 		return
 
-	btn.wait_for_inactive()
+# 	btn.wait_for_inactive()
 
 
 def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
-	"""Move both servos smoothly to the supplied target angles."""
+	"""両方のサーボを指定された角度に動かす．"""
 
 	left_state = servo_states.get("left")
 	right_state = servo_states.get("right")
@@ -269,10 +274,11 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 	current1 = left_state.current_angle
 	current2 = right_state.current_angle
 
-	# Determine the step direction and number of steps needed for each servo.
+	# 各サーボの移動方向を決定する
 	step1 = 0 if target1 == current1 else (1 if target1 > current1 else -1)
 	step2 = 0 if target2 == current2 else (1 if target2 > current2 else -1)
 
+	# 移動する角度の絶対値を計算する
 	steps1 = abs(target1 - current1)
 	steps2 = abs(target2 - current2)
 	total_steps = max(steps1, steps2)
@@ -301,7 +307,7 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 
 			time.sleep(STEP_DELAY_S)
 
-		# Ensure we finish exactly on the targets.
+		# 最終的な目標角度を設定する
 		left_state.current_angle = target1
 		right_state.current_angle = target2
 		_apply_angle(left_state, target1)
@@ -313,32 +319,44 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 		right_state.servo.detach()
 
 
-def execute_pour_cycle() -> None:
-	"""Run the full pour motion sequence once."""
+def move_to_start() -> None:
+	"""2つのサーボを設定された開始角度に移動させる。"""
 
 	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+
+
+def move_to_end() -> None:
+	"""2つのサーボを設定された終了角度に移動させる。"""
+
 	move_servos(END_ANGLE1, END_ANGLE2, ROTATE_DELAY_MS)
+
+
+def execute_pour_cycle() -> None:
+	"""自動注入サイクルを1回実行する。"""
+
+	move_to_start()
+	move_to_end()
 	time.sleep(POURING_TIME_MS / 1000.0)
-	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+	move_to_start()
 
 
-def pour_auto(button1_pressed: bool) -> None:
-	"""Execute the automatic pouring routine when button 1 is triggered."""
+def pour_auto(is_pressed: bool) -> None:
+	"""ボタンがトリガーされたときに自動注入ルーチンを実行する。"""
 
-	if button1_pressed:
+	if is_pressed:
 		logging.debug("Auto pour triggered")
 		time.sleep(DEBOUNCE_DELAY_S)
-		wait_for_button_release(button1)
+		button1.wait_for_inactive()
 
 		execute_pour_cycle()
 
 
-def timer(button1_pressed: bool) -> None:
-	"""Measure and log the duration that button 1 stays pressed."""
+def timer(is_pressed: bool) -> None:
+	"""ログにボタン1の押下時間をミリ秒単位で記録する。"""
 
 	global press_start_time
 
-	if button1_pressed:
+	if is_pressed:
 		if press_start_time is None:
 			press_start_time = time.monotonic()
 			logging.debug("Timer start")
@@ -354,87 +372,107 @@ def handle_manual_mode(
 	button3_pressed: bool,
 	button4_pressed: bool,
 ) -> None:
-	"""Drive servos according to manual-mode button inputs."""
+	"""手動モードでのサーボ制御を処理する．"""
 
 	if button1_pressed:
-		move_servos(END_ANGLE1, END_ANGLE2, ROTATE_DELAY_MS)
+		move_to_end()
 	elif button3_pressed:
 		move_servos(END_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
 	elif button4_pressed:
 		move_servos(START_ANGLE1, END_ANGLE2, ROTATE_DELAY_MS)
 	else:
-		move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+		move_to_start()
+
+def process_queue_messages(command_queue: queue.Queue) -> bool:
+	"""キューからの保留中のメッセージを受け取り，それに応じてサーボを制御する。"""
+
+	global detector_hold_active
+
+	continue_running = True
+
+	while True:
+		try:
+			message = command_queue.get_nowait()
+		except queue.Empty:
+			break
+
+		if message is None:
+			logging.info("Queue sentinel received; exiting servo loop")
+			continue_running = False
+			break
+
+		command = message.get("type") if isinstance(message, dict) else message
+
+		if command == "start_pour":
+			if not detector_hold_active:
+				logging.debug("Detector requested start: %s", message)
+				move_to_end()
+				detector_hold_active = True
+		elif command == "stop_pour":
+			if detector_hold_active:
+				logging.debug("Detector requested stop: %s", message)
+				move_to_start()
+				detector_hold_active = False
+		elif command == "trigger_pour":
+			logging.debug("Legacy trigger command received")
+			execute_pour_cycle()
+		elif command == "shutdown":
+			logging.info("Shutdown command received; exiting servo loop")
+			continue_running = False
+			break
+		else:
+			logging.debug("Ignoring unknown queue message: %s", message)
+
+	return continue_running
 
 
-def loop() -> None:
-	"""Continuous control loop analogous to the Arduino ``loop`` function."""
+def loop(command_queue: Optional[queue.Queue] = None) -> None:
+	"""メインの制御ループ。手動モードと自動モードを処理し、キューからのメッセージを監視する。"""
 
-	global is_on
+	global is_on, detector_hold_active
 
 	assert button1 is not None and button2 is not None and button3 is not None and button4 is not None
 
-	while True:
-		button1_state = is_button_pressed(button1)
-		button2_state = is_button_pressed(button2)
-		button3_state = is_button_pressed(button3)
-		button4_state = is_button_pressed(button4)
+	running = True
+	while running:
+		if command_queue is not None:
+			running = process_queue_messages(command_queue)
+			if not running:
+				break
+
+		button1_state = button1.is_active
+		button2_state = button2.is_active
+		button3_state = button3.is_active
+		button4_state = button4.is_active
 
 		if button2_state:
 			time.sleep(DEBOUNCE_DELAY_S)
-			wait_for_button_release(button2)
+			button2.wait_for_inactive()
 			is_on = not is_on
 			set_led(is_on)
 			logging.info("Manual mode %s", "ENABLED" if is_on else "DISABLED")
+			if is_on and detector_hold_active:
+				move_to_start()
+				detector_hold_active = False
 
 		if is_on:
 			handle_manual_mode(button1_state, button3_state, button4_state)
 		else:
-			pour_auto(button1_state)
+			if not detector_hold_active:
+				pour_auto(button1_state)
 
 		timer(button1_state)
 		time.sleep(0.01)
 
 
 def initialise() -> None:
-	"""Set up logging, GPIO, servos, and initial positions."""
+	"""ログの設定、GPIO、サーボ、および初期位置を設定する。"""
 
 	setup_logging()
 	setup_devices()
 
-	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+	move_to_start()
 
-
-def run_queue_consumer(command_queue, poll_timeout: float = 0.1) -> None:
-	"""Drive the servos based on messages received from *command_queue*."""
-
-	setup_logging()
-	setup_devices()
-	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
-
-	logging.info("Queue-driven servo control ready")
-
-	try:
-		while True:
-			try:
-				message = command_queue.get(timeout=poll_timeout)
-			except queue.Empty:
-				continue
-
-			if message is None:
-				logging.info("Received shutdown sentinel")
-				break
-
-			action = message.get("type") if isinstance(message, dict) else message
-			if action == "trigger_pour":
-				logging.debug("Trigger received: %s", message)
-				execute_pour_cycle()
-			elif action == "shutdown":
-				logging.info("Shutdown command received")
-				break
-			else:
-				logging.debug("Ignoring unknown message: %s", message)
-	finally:
-		cleanup()
 
 
 def register_signal_handlers() -> None:
@@ -449,14 +487,20 @@ def register_signal_handlers() -> None:
 		signal.signal(sig, _handle_signal)
 
 
-def main() -> None:
-	"""Entrypoint for running the control loop from the command line."""
+def run(command_queue: Optional[queue.Queue] = None) -> None:
+	"""制御ループをコマンドラインから実行するエントリポイント。もしキューが提供されれば、それを使用してコマンドを受信する。"""
 
 	try:
 		initialise()
 		register_signal_handlers()
-		logging.info("Servo control ready. Press Ctrl+C to exit.")
-		loop()
+		if command_queue is not None:
+			logging.info("Queue is ready.")
+			logging.info("Servo control ready. Press Ctrl+C to exit.")
+			loop(command_queue)
+		else:
+			logging.info("No command queue provided; running in standalone mode.")
+			logging.info("Servo control ready. Press Ctrl+C to exit.")
+			loop()
 	except KeyboardInterrupt:
 		logging.info("Interrupted by user. Cleaning up.")
 	finally:
@@ -464,4 +508,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-	main()
+	run()

@@ -5,6 +5,7 @@ from app import servo_control
 
 
 TRIGGER_REGION = (800, 1120, 400, 680)  # (x_min, x_max, y_min, y_max)
+RELEASE_DELAY_S = 0.75
 
 
 def run_camera(cmd_queue: Queue) -> None:
@@ -14,12 +15,13 @@ def run_camera(cmd_queue: Queue) -> None:
         command_queue=cmd_queue,
         trigger_region=TRIGGER_REGION,
         trigger_cooldown_s=1.5,
+        release_delay_s=RELEASE_DELAY_S,
     )
     detector.run()
 
 
 def run_servos(cmd_queue: Queue) -> None:
-    servo_control.run_queue_consumer(cmd_queue)
+    servo_control.run(cmd_queue)
 
 
 if __name__ == "__main__":
