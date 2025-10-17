@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
 import glob
+import time
+
+from typing import Optional, Tuple
 
 from serial_handler import SerialHandler
 
@@ -19,7 +22,10 @@ class PancakeDetector:
         fps=30,
         serial_port=None,
         baudrate=115200,
-        timeout=1
+        timeout=1,
+        command_queue=None,
+        trigger_region: Optional[Tuple[int, int, int, int]] = None,
+        trigger_cooldown_s: float = 1.0,
         ):
 
         self.cap = self.init_camera(camera_index)
@@ -51,6 +57,11 @@ class PancakeDetector:
             except Exception as e:
                 print(f"シリアル通信の初期化に失敗しました: {e}")
                 self.serial = None
+
+        self.command_queue = command_queue
+        self.trigger_region = trigger_region
+        self.trigger_cooldown_s = max(0.0, trigger_cooldown_s)
+        self._last_trigger_ts = 0.0
 
     def init_camera(self, camera_index):
         """カメラを初期化"""
@@ -207,6 +218,38 @@ class PancakeDetector:
         return mask, hsv_frame, contours
 
 
+    def _should_trigger(self, center_x: int, center_y: int) -> bool:
+        if self.trigger_region is None:
+            return False
+        x_min, x_max, y_min, y_max = self.trigger_region
+        return x_min <= center_x <= x_max and y_min <= center_y <= y_max
+
+
+    def maybe_send_trigger(self, center_x: int, center_y: int, area: float) -> None:
+        if self.command_queue is None:
+            return
+
+        now = time.time()
+        if now - self._last_trigger_ts < self.trigger_cooldown_s:
+            return
+
+        if not self._should_trigger(center_x, center_y):
+            return
+
+        message = {
+            "type": "trigger_pour",
+            "center": (center_x, center_y),
+            "area": area,
+            "timestamp": now,
+        }
+        try:
+            self.command_queue.put_nowait(message)
+            self._last_trigger_ts = now
+            print(f"[Detector] Trigger enqueued: {message}")
+        except Exception as exc:
+            print(f"キューへの送信に失敗しました: {exc}")
+
+
     def convert_to_real_coordinates(self, pixel_coords):
         """
         画像座標を現実座標に変換（z=0平面を仮定）
@@ -274,7 +317,8 @@ class PancakeDetector:
             mask, hsv_frame, contours = self.detect_contour(frame)
             # 検出した輪郭を描画
             for contour in contours:
-                if cv2.contourArea(contour) <= self.MIN_CONTOUR_AREA:
+                area = cv2.contourArea(contour)
+                if area <= self.MIN_CONTOUR_AREA:
                     continue
 
                 x, y, w, h = cv2.boundingRect(contour)
@@ -302,6 +346,8 @@ class PancakeDetector:
                 # シリアル通信で座標を送信
                 if self.serial:
                     self.serial.send(f"({real_center_x:.3f}, {real_center_y:.3f})")
+
+                self.maybe_send_trigger(center_x, center_y, area)
 
             # 結果を表示
             cv2.imshow(self.window_name, frame)

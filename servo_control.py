@@ -19,6 +19,7 @@ import logging
 import signal
 import sys
 import time
+import queue
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -149,6 +150,7 @@ def setup_devices() -> None:
 		)
 	}
 
+
 def _apply_angle(state: ServoConfig, logical_angle: int) -> None:
     physical = logical_angle
     if state.is_reversed:
@@ -192,6 +194,7 @@ def setup_servo(
 		max_pulse_width=SERVO_MAX_PULSE_US / 1_000_000.0,
 		initial_angle=initial_angle,
 	)
+	
 	logging.debug("Servo on pin %d initialised at %d°", pin, initial_angle)
 	return ServoConfig(
 		servo=servo, id=id, pin=pin, start_angle=start_angle, end_angle=end_angle, current_angle=initial_angle, is_reversed=is_reversed
@@ -310,6 +313,15 @@ def move_servos(angle1: int, angle2: int, interval_ms: int) -> None:
 		right_state.servo.detach()
 
 
+def execute_pour_cycle() -> None:
+	"""Run the full pour motion sequence once."""
+
+	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+	move_servos(END_ANGLE1, END_ANGLE2, ROTATE_DELAY_MS)
+	time.sleep(POURING_TIME_MS / 1000.0)
+	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+
+
 def pour_auto(button1_pressed: bool) -> None:
 	"""Execute the automatic pouring routine when button 1 is triggered."""
 
@@ -318,10 +330,7 @@ def pour_auto(button1_pressed: bool) -> None:
 		time.sleep(DEBOUNCE_DELAY_S)
 		wait_for_button_release(button1)
 
-		move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
-		move_servos(END_ANGLE1, END_ANGLE2, ROTATE_DELAY_MS)
-		time.sleep(POURING_TIME_MS / 1000.0)
-		move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+		execute_pour_cycle()
 
 
 def timer(button1_pressed: bool) -> None:
@@ -393,6 +402,39 @@ def initialise() -> None:
 	setup_devices()
 
 	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+
+
+def run_queue_consumer(command_queue, poll_timeout: float = 0.1) -> None:
+	"""Drive the servos based on messages received from *command_queue*."""
+
+	setup_logging()
+	setup_devices()
+	move_servos(START_ANGLE1, START_ANGLE2, ROTATE_DELAY_MS)
+
+	logging.info("Queue-driven servo control ready")
+
+	try:
+		while True:
+			try:
+				message = command_queue.get(timeout=poll_timeout)
+			except queue.Empty:
+				continue
+
+			if message is None:
+				logging.info("Received shutdown sentinel")
+				break
+
+			action = message.get("type") if isinstance(message, dict) else message
+			if action == "trigger_pour":
+				logging.debug("Trigger received: %s", message)
+				execute_pour_cycle()
+			elif action == "shutdown":
+				logging.info("Shutdown command received")
+				break
+			else:
+				logging.debug("Ignoring unknown message: %s", message)
+	finally:
+		cleanup()
 
 
 def register_signal_handlers() -> None:
