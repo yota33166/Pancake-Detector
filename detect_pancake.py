@@ -14,8 +14,8 @@ class PancakeDetector:
         self,
         camera_index=0,
         calibration_file="calibration.npz",
-        frame_width=320,
-        frame_height=240,
+        frame_width=1920,
+        frame_height=1080,
         fps=30,
         serial_port=None,
         baudrate=115200,
@@ -54,7 +54,7 @@ class PancakeDetector:
 
     def init_camera(self, camera_index):
         """カメラを初期化"""
-        cap = cv2.VideoCapture(camera_index)
+        cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)  # WindowsでのDirectShow使用
         if not cap.isOpened():
             print(f'カメラ{camera_index}が見つかりませんでした。')
             video_devices = glob.glob('/dev/video*')
@@ -321,5 +321,5 @@ class PancakeDetector:
         cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    detector = PancakeDetector(camera_index=0, serial_port="COM3")
+    detector = PancakeDetector(camera_index=0, serial_port='COM3')
     detector.run()
