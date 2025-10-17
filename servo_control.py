@@ -137,16 +137,14 @@ def setup_devices() -> None:
 				pin=SERVO_PIN1,
 				start_angle=START_ANGLE1,
 				end_angle=END_ANGLE1,
-				current_angle=START_ANGLE1,
-				is_reversed=True,
+				is_reversed=False,
 			),
 			setup_servo(
 				id="right",
 				pin=SERVO_PIN2,
 				start_angle=START_ANGLE2,
 				end_angle=END_ANGLE2,
-				current_angle=START_ANGLE2,
-				is_reversed=True,
+				is_reversed=False,
 			),
 		)
 	}
@@ -179,7 +177,6 @@ def setup_servo(
 		pin: int,
 		start_angle: int,
 		end_angle: int,
-		current_angle: int,
 		is_reversed: bool = True
 		) -> ServoConfig:
 	"""Create and start an angular servo at *start_angle*."""
@@ -197,7 +194,7 @@ def setup_servo(
 	)
 	logging.debug("Servo on pin %d initialised at %d°", pin, initial_angle)
 	return ServoConfig(
-		servo=servo, id=id, pin=pin, start_angle=start_angle, end_angle=end_angle, current_angle=current_angle
+		servo=servo, id=id, pin=pin, start_angle=start_angle, end_angle=end_angle, current_angle=initial_angle, is_reversed=is_reversed
 	)
 
 
