@@ -27,6 +27,7 @@ class PancakeDetector:
         trigger_region: Optional[Tuple[int, int, int, int]] = None,
         trigger_cooldown_s: float = 1.0, # 生地注ぎのクールダウン時間
         release_delay_s: float = 0.5, # 最低注ぎ継続時間
+        trigger_area_threshold: Optional[float] = None,
         ):
 
         self.cap = self.init_camera(camera_index)
@@ -63,6 +64,11 @@ class PancakeDetector:
         self.trigger_region = trigger_region
         self.trigger_cooldown_s = max(0.0, trigger_cooldown_s)
         self.release_delay_s = max(0.0, release_delay_s)
+        self.trigger_area_threshold = (
+            float(trigger_area_threshold)
+            if trigger_area_threshold is not None
+            else float(self.MIN_CONTOUR_AREA)
+        )
         self._last_trigger_ts = 0.0
         self._last_seen_ts = 0.0
         self._pour_active = False
@@ -230,6 +236,11 @@ class PancakeDetector:
         return x_min <= center_x <= x_max and y_min <= center_y <= y_max
 
 
+    def _is_over_trigger_region(self, area: float) -> bool:
+        """検出エリアの面積がトリガー閾値以上か確認"""
+        return area >= self.trigger_area_threshold
+
+
     def _send_command(self, command: str, **payload) -> None:
         """コマンドをキューに送信"""
         # キューがない場合は何もしない
@@ -373,8 +384,8 @@ class PancakeDetector:
                 if self.serial:
                     self.serial.send(f"({real_center_x:.3f}, {real_center_y:.3f})")
 
-                if self._is_within_trigger_region(center_x, center_y):
-                    # トリガー領域内であれば開始コマンドをキューに送信
+                if self._is_over_trigger_region(area):
+                    # トリガー領域内かつ面積が閾値以上であれば開始コマンドをキューに送信
                     self.maybe_send_start(center_x, center_y, area)
 
             # 検出が途絶えた場合に停止コマンドをキューに送信
