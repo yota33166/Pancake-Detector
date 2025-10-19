@@ -128,7 +128,7 @@ class ServoController:
 		self.debug = debug
 
 		self.servo_states: Dict[str, ServoConfig] = {}
-		self.pour_hold_active: bool = False
+		self.pour_hold_active: Dict[str, bool] = {"left": False, "right": False}
 		self.is_manual: bool = False
 		self.press_start_time: Optional[float] = None
 
@@ -378,7 +378,17 @@ class ServoController:
 			self._move_to_start()
 
 	def _process_queue_messages(self) -> bool:
-		"""キューからの保留中のメッセージを受け取り，それに応じてサーボを制御する。"""
+		"""キューからの保留中のメッセージを受け取り，それに応じてサーボを制御する。キューの指令は以下の通り：
+		- "start_pour": 両方のサーボで注入を開始
+		- "stop_pour": 両方のサーボで注入を停止
+		- "start_pour_left": 左サーボで注入を開始
+		- "stop_pour_left": 左サーボで注入を停止
+		- "start_pour_right": 右サーボで注入を開始
+		- "stop_pour_right": 右サーボで注入を停止
+		- "start_pour_center": 両方のサーボで注入を開始
+		- "stop_pour_center": 両方のサーボで注入を停止
+		- "shutdown": サーボ制御ループを終了する。
+		"""
 
 		if self.command_queue is None:
 			return False
@@ -400,15 +410,23 @@ class ServoController:
 			command = message.get("type") if isinstance(message, dict) else message
 
 			if command == "start_pour":
-				if not self.pour_hold_active:
-					logging.debug("requested start to pour: %s", message)
-					self._move_to_end()
-					self.pour_hold_active = True
+				self._start_pour_side("left", message)
+				self._start_pour_side("right", message)
 			elif command == "stop_pour":
-				if self.pour_hold_active:
-					logging.debug("requested stop to pour: %s", message)
-					self._move_to_start()
-					self.pour_hold_active = False
+				self._stop_pour_side("left", message)
+				self._stop_pour_side("right", message)
+			elif command in {"start_pour_left", "start_pour_right"}:
+				side = "left" if command.endswith("left") else "right"
+				self._start_pour_side(side, message)
+			elif command in {"stop_pour_left", "stop_pour_right"}:
+				side = "left" if command.endswith("left") else "right"
+				self._stop_pour_side(side, message)
+			elif command == "start_pour_center":
+				self._start_pour_side("left", message)
+				self._start_pour_side("right", message)
+			elif command == "stop_pour_center":
+				self._stop_pour_side("left", message)
+				self._stop_pour_side("right", message)
 			elif command == "trigger_pour":
 				logging.debug("Legacy trigger command received")
 				self._execute_pour_cycle()
@@ -443,7 +461,8 @@ class ServoController:
 				btn.close()
 				setattr(self, attribute, None)
 
-		self.pour_hold_active = False
+		for side in self.pour_hold_active:
+			self.pour_hold_active[side] = False
 		self.is_manual = False
 		self.press_start_time = None
 
@@ -477,6 +496,7 @@ class ServoController:
 
 		running = True
 		while running:
+			# キューからのメッセージを処理する
 			if self.command_queue is not None:
 				running = self._process_queue_messages()
 				if not running:
@@ -487,20 +507,24 @@ class ServoController:
 			button_left_state = self.button_left.is_active
 			button_right_state = self.button_right.is_active
 
+			# マニュアルモードの切り替えを処理する
 			if button_mode_state:
 				time.sleep(self.debounce_delay_s)
 				self.button_mode.wait_for_inactive()
 				self.is_manual = not self.is_manual
 				self._set_led(self.is_manual)
 				logging.info("Manual mode %s", "ENABLED" if self.is_manual else "DISABLED")
-				if self.is_manual and self.pour_hold_active:
+				# マニュアルモードが有効で、注入がアクティブな場合は、サーボを初期位置に戻す
+				if self.is_manual and any(self.pour_hold_active.values()):
 					self._move_to_start()
-					self.pour_hold_active = False
+					for side in self.pour_hold_active:
+						self.pour_hold_active[side] = False
 
 			if self.is_manual:
 				self._handle_manual_mode(button_pour_state, button_left_state, button_right_state)
 			else:
-				if not self.pour_hold_active:
+				# 自動モードでは、注入ボタンが押されたときに注入サイクルを実行する
+				if not any(self.pour_hold_active.values()):
 					self._pour_auto(button_pour_state)
 
 			self._timer(button_pour_state)
@@ -523,6 +547,68 @@ class ServoController:
 			logging.info("Interrupted by user. Cleaning up.")
 		finally:
 			self._cleanup()
+
+	def _start_pour_side(self, side: str, payload) -> None:
+		"""キューでの指令を受けて指定されたサーボ側で注入を開始する。
+		
+		Args:
+			side: 'left'または'right'のいずれか。
+			payload: コマンドのペイロード（デバッグ用）。
+		"""
+		if side not in self.servo_states:
+			logging.debug("Requested start for unknown side '%s'", side)
+			return
+
+		if self.pour_hold_active.get(side, False):
+			return
+
+		logging.debug("requested start to pour %s: %s", side, payload)
+		left_state = self.servo_states.get("left")
+		right_state = self.servo_states.get("right")
+		if left_state is None or right_state is None:
+			raise RuntimeError("Servos not initialised")
+
+		target_left = left_state.current_angle
+		target_right = right_state.current_angle
+
+		if side == "left":
+			target_left = self.motion.end_angle_left
+		elif side == "right":
+			target_right = self.motion.end_angle_right
+
+		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
+		self.pour_hold_active[side] = True
+
+	def _stop_pour_side(self, side: str, payload) -> None:
+		"""キューでの指令を受けて指定されたサーボ側で注入を停止する。
+
+		Args:
+			side: 'left'または'right'のいずれか。
+			payload: コマンドのペイロード（デバッグ用）。
+		"""
+		if side not in self.servo_states:
+			logging.debug("Requested stop for unknown side '%s'", side)
+			return
+
+		if not self.pour_hold_active.get(side, False):
+			return
+
+		logging.debug("requested stop to pour %s: %s", side, payload)
+		left_state = self.servo_states.get("left")
+		right_state = self.servo_states.get("right")
+		if left_state is None or right_state is None:
+			raise RuntimeError("Servos not initialised")
+
+		target_left = left_state.current_angle
+		target_right = right_state.current_angle
+
+		if side == "left":
+			target_left = self.motion.start_angle_left
+		elif side == "right":
+			target_right = self.motion.start_angle_right
+
+		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
+		self.pour_hold_active[side] = False
 
 
 
