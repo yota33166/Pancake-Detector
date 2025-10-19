@@ -21,7 +21,8 @@ def run_camera(cmd_queue: Queue) -> None:
 
 
 def run_servos(cmd_queue: Queue) -> None:
-    servo_control.run(cmd_queue)
+    controller = servo_control.ServoController(command_queue=cmd_queue)
+    controller.run()
 
 
 if __name__ == "__main__":
