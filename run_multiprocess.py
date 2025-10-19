@@ -1,7 +1,7 @@
 from multiprocessing import Process, Queue
 
 from detect_pancake import PancakeDetector
-import servo_control
+import app.servo_controller.servo_control as servo_control
 
 
 TRIGGER_REGION = (800, 1120, 400, 680)  # (x_min, x_max, y_min, y_max)
