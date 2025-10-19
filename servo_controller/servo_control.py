@@ -99,7 +99,16 @@ class ServoConfig:
 
 
 class ServoController:
-	"""サーボとGPIOデバイスのライフサイクルを管理するクラス。"""
+	"""サーボとGPIOデバイスのライフサイクルを管理するクラス。
+	
+	Args:
+		command_queue: コマンドを送信するキュー。
+		pins: GPIOピン割り当て設定。
+		pulse: サーボPWM設定。
+		motion: サーボ動作設定。
+		debounce_delay_s: ボタンデバウンス時間（秒）。
+		debug: デバッグログを有効にするかどうか。
+	"""
 
 	def __init__(
 		self,
@@ -119,7 +128,7 @@ class ServoController:
 		self.debug = debug
 
 		self.servo_states: Dict[str, ServoConfig] = {}
-		self.detector_hold_active: bool = False
+		self.pour_hold_active: bool = False
 		self.is_manual: bool = False
 		self.press_start_time: Optional[float] = None
 
@@ -180,7 +189,15 @@ class ServoController:
 		end_angle: int,
 		is_reversed: bool,
 	) -> ServoConfig:
-		"""初期化されたサーボオブジェクトを作成し、ServoConfigを返す。"""
+		"""初期化されたサーボオブジェクトを作成し、ServoConfigを返す。
+		
+		Args:
+			servo_id: サーボの一意の識別子。
+			pin: サーボが接続されているGPIOピン番号。
+			start_angle: 回転の"開始"位置を表す角度。
+			end_angle: 回転の"終了"位置を表す角度。
+			is_reversed: サーボの回転方向が反転しているかどうか。
+		"""
 
 		logical_initial = clamp(start_angle, 0, self.motion.max_angle)
 		physical_initial = (
@@ -231,7 +248,13 @@ class ServoController:
 		logging.debug("LED %s", "ON" if on else "OFF")
 
 	def _move_servos(self, angle1: int, angle2: int, interval_ms: int) -> None:
-		"""両方のサーボを指定された角度に動かす．"""
+		"""両方のサーボを指定された角度に動かす．
+
+		Args:
+			angle1: 左サーボの目標角度。
+			angle2: 右サーボの目標角度。
+			interval_ms: サーボの移動間隔（ミリ秒）。
+		"""
 
 		left_state = self.servo_states.get("left")
 		right_state = self.servo_states.get("right")
@@ -358,7 +381,7 @@ class ServoController:
 		"""キューからの保留中のメッセージを受け取り，それに応じてサーボを制御する。"""
 
 		if self.command_queue is None:
-			return True
+			return False
 
 		continue_running = True
 
@@ -366,6 +389,7 @@ class ServoController:
 			try:
 				message = self.command_queue.get_nowait()
 			except queue.Empty:
+				continue_running = False
 				break
 
 			if message is None:
@@ -376,15 +400,15 @@ class ServoController:
 			command = message.get("type") if isinstance(message, dict) else message
 
 			if command == "start_pour":
-				if not self.detector_hold_active:
-					logging.debug("Detector requested start: %s", message)
+				if not self.pour_hold_active:
+					logging.debug("requested start to pour: %s", message)
 					self._move_to_end()
-					self.detector_hold_active = True
+					self.pour_hold_active = True
 			elif command == "stop_pour":
-				if self.detector_hold_active:
-					logging.debug("Detector requested stop: %s", message)
+				if self.pour_hold_active:
+					logging.debug("requested stop to pour: %s", message)
 					self._move_to_start()
-					self.detector_hold_active = False
+					self.pour_hold_active = False
 			elif command == "trigger_pour":
 				logging.debug("Legacy trigger command received")
 				self._execute_pour_cycle()
@@ -419,7 +443,7 @@ class ServoController:
 				btn.close()
 				setattr(self, attribute, None)
 
-		self.detector_hold_active = False
+		self.pour_hold_active = False
 		self.is_manual = False
 		self.press_start_time = None
 
@@ -458,28 +482,28 @@ class ServoController:
 				if not running:
 					break
 
-			button1_state = self.button_pour.is_active
-			button2_state = self.button_mode.is_active
-			button3_state = self.button_left.is_active
-			button4_state = self.button_right.is_active
+			button_pour_state = self.button_pour.is_active
+			button_mode_state = self.button_mode.is_active
+			button_left_state = self.button_left.is_active
+			button_right_state = self.button_right.is_active
 
-			if button2_state:
+			if button_mode_state:
 				time.sleep(self.debounce_delay_s)
 				self.button_mode.wait_for_inactive()
 				self.is_manual = not self.is_manual
 				self._set_led(self.is_manual)
 				logging.info("Manual mode %s", "ENABLED" if self.is_manual else "DISABLED")
-				if self.is_manual and self.detector_hold_active:
+				if self.is_manual and self.pour_hold_active:
 					self._move_to_start()
-					self.detector_hold_active = False
+					self.pour_hold_active = False
 
 			if self.is_manual:
-				self._handle_manual_mode(button1_state, button3_state, button4_state)
+				self._handle_manual_mode(button_pour_state, button_left_state, button_right_state)
 			else:
-				if not self.detector_hold_active:
-					self._pour_auto(button1_state)
+				if not self.pour_hold_active:
+					self._pour_auto(button_pour_state)
 
-			self._timer(button1_state)
+			self._timer(button_pour_state)
 			time.sleep(0.01)
 
 	def run(self) -> None:
