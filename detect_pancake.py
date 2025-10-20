@@ -32,9 +32,9 @@ class PancakeDetector:
         command_queue: Optional[multiprocessing.Queue] = None,
         trigger_region: Optional[Tuple[int, int, int, int]] = None,
         trigger_cooldown_s: float = 1.0, # 生地注ぎのクールダウン時間
-        max_pour_time_s: float = 5.0, # 最大注ぎ時間
+        max_pour_time_s: float = 2.0, # 最大注ぎ時間
         # release_delay_s: float = 0.5, # 最低注ぎ継続時間
-        trigger_area_threshold: Optional[float] = 500.0,
+        trigger_area_threshold: Optional[float] = 5000.0,
         ):
         frame_size = (frame_width, frame_height)
         self.window_name = "PancakeDetector"
@@ -76,7 +76,6 @@ class PancakeDetector:
 
         now = time.time()
         self.active_sides: Dict[str, bool] = {"left": False, "right": False}
-        self.last_seen_ts: Dict[str, float] = {"left": now, "right": now}
         self.last_trigger_ts: Dict[str, float] = {"left": 0.0, "right": 0.0}
         self.last_center: Dict[str, Optional[Tuple[int, int]]] = {"left": None, "right": None}
 
@@ -263,7 +262,6 @@ class PancakeDetector:
         - start_pour_(side) コマンドの送信条件:
             1. 検出面積がMIN_CONTOUR_AREA以上である
             2. クールダウン時間が経過している
-            3. 目標面積未設定または検出面積が目標面積未満である
         - stop_pour_(side) コマンドの送信条件:
             1. 検出面積がtarget_areaを超えた場合
             （max_pour_time_s経過後に必ず停止する）
@@ -273,12 +271,11 @@ class PancakeDetector:
         # 1. 検出面積がMIN_CONTOUR_AREA以上である
         if area >= self.MIN_CONTOUR_AREA and center is not None:
             # 2. クールダウン時間が経過している
-            self.last_seen_ts[side] = now
             self.last_center[side] = center
             cooldown_elapsed = now - self.last_trigger_ts[side] >= self.trigger_cooldown_s
-            # 3. 目標面積未設定または検出面積が目標面積未満である
-            area_below_target = self.target_area is None or area < self.target_area
-            if self.command_queue is not None and not self.active_sides[side] and cooldown_elapsed and area_below_target:
+            # # 3. 目標面積未設定または検出面積が目標面積未満である
+            # area_below_target = self.target_area is None or area < self.target_area
+            if self.command_queue is not None and not self.active_sides[side] and cooldown_elapsed: # and area_below_target:
                 self._send_command(
                     f"start_pour_{side}",
                     center=center,
@@ -308,12 +305,12 @@ class PancakeDetector:
             return
 
         # max_pour_time_s経過後に必ず停止する
-        if now - self.last_seen_ts[side] >= self.max_pour_time_s:
+        if now - self.last_trigger_ts[side] >= self.max_pour_time_s:
             stop_center = self.last_center[side]
             self._send_command(
                 f"stop_pour_{side}",
                 center=stop_center,
-                reason="timeout",
+                reason="max_pour_time",
             )
             self.active_sides[side] = False
 
