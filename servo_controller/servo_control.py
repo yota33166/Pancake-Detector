@@ -377,8 +377,13 @@ class ServoController:
 		else:
 			self._move_to_start()
 
-	def _process_queue_messages(self) -> bool:
-		"""キューからの保留中のメッセージを受け取り，それに応じてサーボを制御する。キューの指令は以下の通り：
+	def _process_queue_messages(self, apply_commands: bool) -> bool:
+		"""キューからの保留中のメッセージを受け取り，必要に応じてサーボを制御する。
+
+		Args:
+			apply_commands: True のときはキュー指令を実行し，False のときは指令を破棄する。
+
+		キューの指令は以下の通り：
 		- "start_pour": 両方のサーボで注入を開始
 		- "stop_pour": 両方のサーボで注入を停止
 		- "start_pour_left": 左サーボで注入を開始
@@ -409,7 +414,14 @@ class ServoController:
 
 			command = message.get("type") if isinstance(message, dict) else message
 
-			if command == "start_pour":
+			if command == "shutdown":
+				logging.info("Shutdown command received; exiting servo loop")
+				continue_running = False
+				break
+			elif not apply_commands:
+				logging.debug("Ignoring queue message in manual mode: %s", message)
+				continue
+			elif command == "start_pour":
 				self._start_pour_side("left", message)
 				self._start_pour_side("right", message)
 			elif command == "stop_pour":
@@ -430,10 +442,6 @@ class ServoController:
 			elif command == "trigger_pour":
 				logging.debug("Legacy trigger command received")
 				self._execute_pour_cycle()
-			elif command == "shutdown":
-				logging.info("Shutdown command received; exiting servo loop")
-				continue_running = False
-				break
 			else:
 				logging.debug("Ignoring unknown queue message: %s", message)
 
@@ -496,10 +504,10 @@ class ServoController:
 
 		running = True
 		while running:
-			# キューからのメッセージを処理する
+			# キューからのメッセージを処理する（マニュアルモードの場合は無視する）
 			if self.command_queue is not None:
-				running = self._process_queue_messages()
-				if not running:
+				if not self._process_queue_messages(apply_commands=not self.is_manual):
+					running = False
 					break
 
 			button_pour_state = self.button_pour.is_active
