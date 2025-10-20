@@ -396,7 +396,7 @@ class ServoController:
 		"""
 
 		if self.command_queue is None:
-			return False
+			return True
 
 		continue_running = True
 
@@ -404,7 +404,6 @@ class ServoController:
 			try:
 				message = self.command_queue.get_nowait()
 			except queue.Empty:
-				continue_running = False
 				break
 
 			if message is None:
