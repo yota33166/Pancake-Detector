@@ -382,6 +382,8 @@ class ServoController:
 
 		Args:
 			apply_commands: True のときはキュー指令を実行し，False のときは指令を破棄する。
+		Returns:
+			loop()関数を継続するかどうか。
 
 		キューの指令は以下の通り：
 		- "start_pour": 両方のサーボで注入を開始
