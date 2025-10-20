@@ -34,7 +34,7 @@ class PancakeDetector:
         trigger_cooldown_s: float = 1.0, # 生地注ぎのクールダウン時間
         max_pour_time_s: float = 5.0, # 最大注ぎ時間
         # release_delay_s: float = 0.5, # 最低注ぎ継続時間
-        trigger_area_threshold: Optional[float] = None,
+        trigger_area_threshold: Optional[float] = 500.0,
         ):
         frame_size = (frame_width, frame_height)
         self.window_name = "PancakeDetector"
@@ -136,6 +136,10 @@ class PancakeDetector:
 
 
     def run(self) -> None:
+        side_data = {
+            "left": {"area": 0.0, "center": None},
+            "right": {"area": 0.0, "center": None},
+        }
         while True:
             ret, frame = self.camera.read()
             if not ret:
@@ -150,10 +154,12 @@ class PancakeDetector:
             )
 
             now = time.time()
-            side_data = {
-                "left": {"area": 0.0, "center": None},
-                "right": {"area": 0.0, "center": None},
-            }
+            # サーボがアクティブでないサイドのデータを初期化
+            if not self.active_sides["left"]:
+                side_data["left"] = {"area": 0.0, "center": None}
+            if not self.active_sides["right"]:
+                side_data["right"] = {"area": 0.0, "center": None}
+
             for contour in contours:
                 area = cv2.contourArea(contour)
                 if area <= thresholds.min_area:
@@ -191,7 +197,7 @@ class PancakeDetector:
             for side in ("left", "right"):
                 area = side_data[side]["area"]
                 center = side_data[side]["center"]
-                self._evaluate_side(side, area, center, now)
+                self._evaluate_and_send_commands(side, area, center, now)
 
             cv2.imshow(self.window_name, frame)
 
@@ -245,20 +251,32 @@ class PancakeDetector:
             side_data[side]["area"] = area
             side_data[side]["center"] = center
 
-    def _evaluate_side(
+    def _evaluate_and_send_commands(
         self,
         side: str,
         area: float,
         center: Optional[Tuple[int, int]],
         now: float,
     ) -> None:
-        """サイドごとのパンケーキの状態を評価し、必要に応じてコマンドを送信する。"""
+        """サイドごとのパンケーキの状態を評価し、必要に応じてコマンドを送信する。
+        
+        - start_pour_(side) コマンドの送信条件:
+            1. 検出面積がMIN_CONTOUR_AREA以上である
+            2. クールダウン時間が経過している
+            3. 目標面積未設定または検出面積が目標面積未満である
+        - stop_pour_(side) コマンドの送信条件:
+            1. 検出面積がtarget_areaを超えた場合
+            （max_pour_time_s経過後に必ず停止する）
+        """
 
-        # 開始条件の評価（面積と中心座標の確認，クールダウン時間の経過確認）
+        # 開始条件の評価
+        # 1. 検出面積がMIN_CONTOUR_AREA以上である
         if area >= self.MIN_CONTOUR_AREA and center is not None:
+            # 2. クールダウン時間が経過している
             self.last_seen_ts[side] = now
             self.last_center[side] = center
             cooldown_elapsed = now - self.last_trigger_ts[side] >= self.trigger_cooldown_s
+            # 3. 目標面積未設定または検出面積が目標面積未満である
             area_below_target = self.target_area is None or area < self.target_area
             if self.command_queue is not None and not self.active_sides[side] and cooldown_elapsed and area_below_target:
                 self._send_command(
@@ -310,5 +328,5 @@ class PancakeDetector:
             print(f"キューへの送信に失敗しました: {exc}")
 
 if __name__ == '__main__':
-    detector = PancakeDetector(camera_index=0, serial_port='COM3')
+    detector = PancakeDetector(camera_index=0, serial_port='COM3', command_queue=multiprocessing.Queue())
     detector.run()
