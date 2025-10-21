@@ -451,9 +451,15 @@ class ServoController:
 	def _cleanup(self) -> None:
 		"""サーボ，ボタン，LEDのクリーンアップを行う．"""
 
-		# サーボを初期位置に戻す
-		logging.debug("Moving servos to start position for cleanup")
-		self._move_to_start()
+		# サーボが初期化済みであれば開始角度へ戻す
+		left_state = self.servo_states.get("left")
+		right_state = self.servo_states.get("right")
+		if left_state is not None and right_state is not None:
+			logging.debug("Moving servos to start position for cleanup")
+			try:
+				self._move_to_start()
+			except RuntimeError as exc:
+				logging.debug("Skipping servo reset during cleanup: %s", exc)
 
 		logging.debug("Cleaning up gpiozero devices")
 
