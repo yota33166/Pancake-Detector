@@ -60,8 +60,8 @@ class MotionConfig:
 	start_angle_right: int = 160
 	end_angle_right: int = 100
 	step_delay_s: float = 0.005
-	reverse_left: bool = False
-	reverse_right: bool = False
+	reverse_left: bool = True
+	reverse_right: bool = True
 
 
 DEFAULT_DEBUG = True
