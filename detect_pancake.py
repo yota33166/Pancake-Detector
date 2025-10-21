@@ -268,6 +268,7 @@ class PancakeDetector:
         """
 
         # 開始条件の評価
+        # TODO 開始条件をserial通信の応答に基づいて拡張する
         # 1. 検出面積がMIN_CONTOUR_AREA以上である
         if area >= self.MIN_CONTOUR_AREA and center is not None:
             # 2. クールダウン時間が経過している
