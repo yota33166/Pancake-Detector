@@ -55,10 +55,10 @@ class MotionConfig:
 	rotate_delay_ms: int = 20
 	pour_time_ms: int = 1000
 	max_angle: int = 180
-	start_angle_left: int = 20
-	end_angle_left: int = 80
-	start_angle_right: int = 160
-	end_angle_right: int = 100
+	start_angle_left: int = 160
+	end_angle_left: int = 100
+	start_angle_right: int = 20
+	end_angle_right: int = 80
 	step_delay_s: float = 0.005
 	reverse_left: bool = True
 	reverse_right: bool = True
