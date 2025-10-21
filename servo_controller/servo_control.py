@@ -23,7 +23,7 @@ import queue
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from gpiozero import AngularServo, Button, LED  # type: ignore[misc]
+from gpiozero import AngularServo, Button, LED, exc  # type: ignore[misc]
 
 
 @dataclass(frozen=True)
@@ -305,8 +305,14 @@ class ServoController:
 
 			time.sleep(max(interval_ms, 0) / 1000.0)
 		finally:
-			left_state.servo.detach()
-			right_state.servo.detach()
+			for servo_state in (left_state, right_state):
+				if servo_state is None:
+					continue
+				try:
+					if getattr(servo_state.servo, "pwm_device", None) is not None:
+						servo_state.servo.detach()
+				except Exception as exc:
+					logging.debug("Skipping servo detach: %s", exc)
 
 	def _move_to_start(self) -> None:
 		"""2つのサーボを設定された開始角度に移動させる。"""
