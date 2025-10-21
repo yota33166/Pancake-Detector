@@ -25,7 +25,7 @@ class PancakeDetector:
         calibration_file="calibration.npz",
         frame_width=480,
         frame_height=320,
-        fps=30,
+        fps=20,
         serial_port: Optional[str] = None,
         baudrate=115200,
         timeout=1,
