@@ -451,6 +451,10 @@ class ServoController:
 	def _cleanup(self) -> None:
 		"""サーボ，ボタン，LEDのクリーンアップを行う．"""
 
+		# サーボを初期位置に戻す
+		logging.debug("Moving servos to start position for cleanup")
+		self._move_to_start()
+
 		logging.debug("Cleaning up gpiozero devices")
 
 		for state in self.servo_states.values():
