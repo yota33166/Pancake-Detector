@@ -11,11 +11,14 @@ RELEASE_DELAY_S = 0.75
 def run_camera(cmd_queue: Queue) -> None:
     detector = PancakeDetector(
         camera_index=0,
-        serial_port='COM3',
+        frame_width=480,
+        frame_height=320,
+        fps=20,
+        serial_port='ttyUSB0',
         command_queue=cmd_queue,
         trigger_region=TRIGGER_REGION,
         trigger_cooldown_s=1.5,
-        release_delay_s=RELEASE_DELAY_S,
+        max_pour_time_s=2.0,
     )
     detector.run()
 
