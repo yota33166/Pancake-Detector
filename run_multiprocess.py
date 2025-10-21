@@ -2,7 +2,7 @@ from multiprocessing import Process, Queue
 
 from detect_pancake import PancakeDetector
 import servo_controller.servo_control as servo_control
-
+import logging
 
 TRIGGER_REGION = (800, 1120, 400, 680)  # (x_min, x_max, y_min, y_max)
 RELEASE_DELAY_S = 0.75
@@ -35,5 +35,9 @@ if __name__ == "__main__":
     servo_proc.start()
 
     cam_proc.join()
-    command_queue.put(None)
+    logging.debug("camera process exited: exitcode=%s", cam_proc.exitcode)
+    if cam_proc.exitcode not in (0, None):
+        logging.debug("camera died early; sending sentinel to servos")
+        command_queue.put(None)
+
     servo_proc.join()
