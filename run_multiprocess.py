@@ -4,9 +4,6 @@ from detect_pancake import PancakeDetector
 import servo_controller.servo_control as servo_control
 import logging
 
-TRIGGER_REGION = (800, 1120, 400, 680)  # (x_min, x_max, y_min, y_max)
-RELEASE_DELAY_S = 0.75
-
 
 def run_camera(cmd_queue: Queue) -> None:
     detector = PancakeDetector(
@@ -16,7 +13,6 @@ def run_camera(cmd_queue: Queue) -> None:
         fps=20,
         serial_port='ttyUSB0',
         command_queue=cmd_queue,
-        trigger_region=TRIGGER_REGION,
         trigger_cooldown_s=1.5,
         max_pour_time_s=2.0,
     )
