@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
@@ -201,39 +202,78 @@ class GestureRecognizerRunner:
 		if not snapshot:
 			return
 
-		top = snapshot.top_category()
-		if top:
-			caption = f"{top.name} ({top.score:.2f})"
-			cv2.putText(
-				frame,
-				caption,
-				(10, 30),
-				cv2.FONT_HERSHEY_SIMPLEX,
-				0.9,
-				(0, 255, 0),
-				2,
-				cv2.LINE_AA,
-			)
+		for landmarks, category in zip_longest(snapshot.landmarks, snapshot.categories):
+			self._draw_hand_annotations(frame, landmarks, category)
 
-		for hand_landmarks in snapshot.landmarks:
-			proto = landmark_pb2.NormalizedLandmarkList()
-			proto.landmark.extend(
-				landmark_pb2.NormalizedLandmark(
-					x=lm.x,
-					y=lm.y,
-					z=lm.z,
-					visibility=getattr(lm, "visibility", 0.0),
-					presence=getattr(lm, "presence", 0.0),
-				)
-				for lm in hand_landmarks
+	def _draw_hand_annotations(
+		self,
+		frame,
+		hand_landmarks: Sequence[landmark_pb2.NormalizedLandmark],
+		category: Optional[GestureCategoryResult],
+	) -> None:
+		"""検出した手のランドマークとラベルを描く。"""
+
+		if not hand_landmarks:
+			return
+
+		proto = landmark_pb2.NormalizedLandmarkList()
+		proto.landmark.extend(
+			landmark_pb2.NormalizedLandmark(
+				x=lm.x,
+				y=lm.y,
+				z=lm.z,
+				visibility=getattr(lm, "visibility", 0.0),
+				presence=getattr(lm, "presence", 0.0),
 			)
-			mp_drawing.draw_landmarks(
-				frame,
-				proto,
-				mp_hands.HAND_CONNECTIONS,
-				mp_drawing_styles.get_default_hand_landmarks_style(),
-				mp_drawing_styles.get_default_hand_connections_style(),
-			)
+			for lm in hand_landmarks
+		)
+		mp_drawing.draw_landmarks(
+			frame,
+			proto,
+			mp_hands.HAND_CONNECTIONS,
+			mp_drawing_styles.get_default_hand_landmarks_style(),
+			mp_drawing_styles.get_default_hand_connections_style(),
+		)
+
+		if not category:
+			return
+
+		height, width = frame.shape[:2]
+		wrist = hand_landmarks[0]
+		x_px = min(max(int(wrist.x * width), 0), width - 1)
+		y_px = min(max(int(wrist.y * height) - 10, 0), height - 1)
+
+		if category.name == "Pointing_Up":
+			show_name = "Pour Left"
+		elif category.name == "Victory":
+			show_name = "Pour Right"
+		elif category.name == "Open_Palm":
+			show_name = "Pour Both"
+		else:
+			show_name = category.name
+
+		label = f"{show_name} ({category.score:.2f})"
+		size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+		rect_x2 = min(x_px + size[0] + 10, width - 1)
+		rect_y1 = max(y_px - size[1] - baseline - 6, 0)
+		rect_y2 = min(y_px + baseline + 6, height - 1)
+		cv2.rectangle(
+			frame,
+			(x_px - 5, rect_y1),
+			(rect_x2, rect_y2),
+			(0, 0, 0),
+			cv2.FILLED,
+		)
+		cv2.putText(
+			frame,
+			label,
+			(x_px, y_px),
+			cv2.FONT_HERSHEY_SIMPLEX,
+			0.6,
+			(0, 255, 0),
+			2,
+			cv2.LINE_AA,
+		)
 
 
 def run_realtime_detection(camera_index: int = 0, model_path: Path = MODEL_PATH) -> None:
