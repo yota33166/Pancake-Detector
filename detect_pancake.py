@@ -98,38 +98,47 @@ class PancakeDetector:
     ) -> None:
         center_x, center_y = center
 
-        if average_hsv is not None:
-            h, s, v = average_hsv
-            cv2.putText(
-                frame,
-                f"HSV({h:.1f}, {s:.1f}, {v:.1f})",
-                (center_x + 10, center_y + 15),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (255, 0, 0),
-                2,
-            )
+        # if average_hsv is not None:
+        #     h, s, v = average_hsv
+        #     cv2.putText(
+        #         frame,
+        #         f"HSV({h:.1f}, {s:.1f}, {v:.1f})",
+        #         (center_x + 10, center_y + 15),
+        #         cv2.FONT_HERSHEY_SIMPLEX,
+        #         1.0,
+        #         (255, 0, 0),
+        #         2,
+        #     )
 
+        # Build label and color
         if real_coords is not None:
-            cv2.putText(
-                frame,
-                f"World(Norm): ({real_coords[0]:.3f}, {real_coords[1]:.3f})",
-                (center_x + 10, center_y + 35),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 128, 255),
-                2,
-            )
+            text = f"World(Norm): ({real_coords[0]:.3f}, {real_coords[1]:.3f})"
+            text_color = (0, 128, 255)
+        else:
+            text = f"Center: ({center_x}, {center_y})"
+            text_color = (0, 255, 0)
 
-        cv2.putText(
-            frame,
-            f"Center: ({center_x}, {center_y})",
-            (center_x + 10, center_y - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (255, 0, 0),
-            2,
-        )
+        # Text rendering params
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 2
+        pad = 4
+
+        # Text origin (baseline at this point)
+        org = (center_x + 10, center_y + 35)
+
+        # Measure text and draw background rectangle
+        (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+        x1 = org[0] - pad
+        y1 = org[1] - text_h - baseline - pad
+        x2 = org[0] + text_w + pad
+        y2 = org[1] + pad
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 0), cv2.FILLED)
+
+        # Draw text over the background
+        cv2.putText(frame, text, org, font, font_scale, text_color, thickness)
+
+
         cv2.circle(frame, center, 5, (0, 255, 0), -1)
         cv2.drawContours(frame, [contour], -1, (0, 255, 0), 2)
 
