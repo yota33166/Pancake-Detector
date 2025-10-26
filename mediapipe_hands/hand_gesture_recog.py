@@ -135,30 +135,31 @@ class GestureRecognizerRunner:
 			result_callback=self._handle_result,
 		)
 
-		with GestureRecognizer.create_from_options(options) as recognizer:
-			try:
-				while True:
-					ret, frame = cap.read()
-					if not ret:
-						logger.warning("failed to read frame from camera")
-						break
+		recognizer = GestureRecognizer.create_from_options(options)
+		try:
+			while True:
+				ret, frame = cap.read()
+				if not ret:
+					logger.warning("failed to read frame from camera")
+					break
 
-					frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-					mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-					recognizer.recognize_async(mp_image, int(time.time() * 1000))
+				frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+				mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+				recognizer.recognize_async(mp_image, int(time.time() * 1000))
 
-					self._render_overlay(frame)
+				self._render_overlay(frame)
 
-					cv2.imshow(self.window_name, frame)
-					key = cv2.waitKey(1) & 0xFF
-					if key in (27, ord('q')):
-						logger.info("exit requested by keypress: %s", key)
-						break
-			finally:
-				cap.release()
-				cv2.destroyWindow(self.window_name)
-				cv2.destroyAllWindows()
-				logger.info("gesture recognition stopped")
+				cv2.imshow(self.window_name, frame)
+				key = cv2.waitKey(1) & 0xFF
+				if key in (27, ord('q')):
+					logger.info("exit requested by keypress: %s", key)
+					break
+		finally:
+			recognizer.close()
+			cap.release()
+			cv2.destroyWindow(self.window_name)
+			cv2.destroyAllWindows()
+			logger.info("gesture recognition stopped")
 
 	def _handle_result(self, result: GestureRecognizerResultType, output_image, timestamp_ms: int) -> None:
 		"""MediaPipe から受け取った結果をスナップショットに変換する。"""
@@ -216,24 +217,25 @@ class GestureRecognizerRunner:
 		if not hand_landmarks:
 			return
 
-		proto = landmark_pb2.NormalizedLandmarkList()
-		proto.landmark.extend(
-			landmark_pb2.NormalizedLandmark(
-				x=lm.x,
-				y=lm.y,
-				z=lm.z,
-				visibility=getattr(lm, "visibility", 0.0),
-				presence=getattr(lm, "presence", 0.0),
-			)
-			for lm in hand_landmarks
-		)
-		mp_drawing.draw_landmarks(
-			frame,
-			proto,
-			mp_hands.HAND_CONNECTIONS,
-			mp_drawing_styles.get_default_hand_landmarks_style(),
-			mp_drawing_styles.get_default_hand_connections_style(),
-		)
+		# ランドマーク描画（なぜか上手く描画されない）
+		# proto = landmark_pb2.NormalizedLandmarkList()
+		# proto.landmark.extend(
+		# 	landmark_pb2.NormalizedLandmark(
+		# 		x=lm.x,
+		# 		y=lm.y,
+		# 		z=lm.z,
+		# 		visibility=getattr(lm, "visibility", 0.0),
+		# 		presence=getattr(lm, "presence", 0.0),
+		# 	)
+		# 	for lm in hand_landmarks
+		# )
+		# mp_drawing.draw_landmarks(
+		# 	frame,
+		# 	proto,
+		# 	mp_hands.HAND_CONNECTIONS,
+		# 	mp_drawing_styles.get_default_hand_landmarks_style(),
+		# 	mp_drawing_styles.get_default_hand_connections_style(),
+		# )
 
 		if not category:
 			return
