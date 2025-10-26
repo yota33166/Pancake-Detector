@@ -277,9 +277,9 @@ class GestureRecognizerRunner:
 			(x_px, y_px),
 			cv2.FONT_HERSHEY_SIMPLEX,
 			0.6,
-			(0, 255, 0),
+			(254, 220, 156),
 			2,
-			cv2.LINE_AA,
+			# cv2.LINE_AA,
 		)
 
 

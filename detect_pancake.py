@@ -122,11 +122,10 @@ class PancakeDetector:
         # Build label and color
         if real_coords is not None:
             text = f"World(Norm): ({real_coords[0]:.3f}, {real_coords[1]:.3f})"
-            text_color = (0, 128, 255)
-        else:
-            text = f"Center: ({center_x}, {center_y})"
             text_color = (0, 255, 0)
-
+        else:
+            text = f"Pancake: ({center_x}, {center_y})"
+            text_color = (141, 192, 177)
         # Text rendering params
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.6
