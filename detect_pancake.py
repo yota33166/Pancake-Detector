@@ -5,10 +5,12 @@ from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
+import mediapipe as mp
 
 from detector.camera import CameraManager
 from detector.pipeline import FrameProcessor
 from detector.ui import DetectorUI
+from mediapipe_hands.hand_gesture_recog import GestureRecognizerRunner
 from serial_handler import SerialHandler
 
 
@@ -51,6 +53,12 @@ class PancakeDetector:
             )
         except RuntimeError as exc:
             print(f"カメラの初期化に失敗しました: {exc}")
+            sys.exit(1)
+
+        try:
+            self.gesture_recognizer_runner = GestureRecognizerRunner()
+        except RuntimeError as exc:
+            print(f"mediapipeジェスチャー認識器の初期化に失敗しました: {exc}")
             sys.exit(1)
 
         self.frame_processor = FrameProcessor(self.HISTORY_SIZE)
@@ -149,6 +157,7 @@ class PancakeDetector:
             "left": {"area": 0.0, "center": None},
             "right": {"area": 0.0, "center": None},
         }
+        recognizer = self.gesture_recognizer_runner.init_recognizer()
         while True:
             ret, frame = self.camera.read()
             if not ret:
@@ -161,6 +170,10 @@ class PancakeDetector:
                 thresholds.lower,
                 thresholds.upper,
             )
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+            recognizer.recognize_async(mp_image, int(time.time() * 1000))
+            self.gesture_recognizer_runner.render_overlay(frame)
 
             now = time.time()
             # サーボがアクティブでないサイドのデータを初期化
@@ -220,6 +233,8 @@ class PancakeDetector:
 
         # 終了処理
         self.camera.release()
+        if recognizer:
+            recognizer.close()
         if self.command_queue:
             for side in ("left", "right"):
                 if self.active_sides[side]:
@@ -294,6 +309,7 @@ class PancakeDetector:
 
         # 開始条件の評価
         # 2. キー入力による手動開始
+        # TODO : mediapipe_handsのジェスチャー認識結果を用いた開始条件の追加
         if self.key in manual_mapping and manual_mapping[self.key] == side:
             # 1. クールダウン時間が経過している
             self.last_center[side] = center

@@ -112,6 +112,18 @@ class GestureRecognizerRunner:
 		score_threshold = threshold if threshold is not None else self.min_score
 		return snapshot.is_matching(gesture_name, score_threshold)
 
+	def init_recognizer(self):
+		"""Gesture Recognizer を初期化する。"""
+
+		options = GestureRecognizerOptions(
+			base_options=BaseOptions(model_asset_path=str(self.model_path)),
+			num_hands=self.num_hands,
+			running_mode=VisionRunningMode.LIVE_STREAM,
+			result_callback=self._handle_result,
+		)
+		recognizer = GestureRecognizer.create_from_options(options)
+		return recognizer
+
 	def run(self) -> None:
 		"""カメラからフレームを取得しながらリアルタイム推論を実行する。"""
 
@@ -128,14 +140,7 @@ class GestureRecognizerRunner:
 			self.model_path,
 		)
 
-		options = GestureRecognizerOptions(
-			base_options=BaseOptions(model_asset_path=str(self.model_path)),
-			num_hands=self.num_hands,
-			running_mode=VisionRunningMode.LIVE_STREAM,
-			result_callback=self._handle_result,
-		)
-
-		recognizer = GestureRecognizer.create_from_options(options)
+		recognizer = self.init_recognizer()
 		try:
 			while True:
 				ret, frame = cap.read()
@@ -147,7 +152,7 @@ class GestureRecognizerRunner:
 				mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
 				recognizer.recognize_async(mp_image, int(time.time() * 1000))
 
-				self._render_overlay(frame)
+				self.render_overlay(frame)
 
 				cv2.imshow(self.window_name, frame)
 				key = cv2.waitKey(1) & 0xFF
@@ -196,7 +201,7 @@ class GestureRecognizerRunner:
 			)
 		return categories
 
-	def _render_overlay(self, frame) -> None:
+	def render_overlay(self, frame) -> None:
 		"""最新結果をフレームに描画する。"""
 
 		snapshot = self._latest_snapshot
