@@ -78,6 +78,7 @@ class PancakeDetector:
         self.active_sides: Dict[str, bool] = {"left": False, "right": False}
         self.last_trigger_ts: Dict[str, float] = {"left": 0.0, "right": 0.0}
         self.last_center: Dict[str, Optional[Tuple[int, int]]] = {"left": None, "right": None}
+        self.key = -1
 
         self.serial = None
         if serial_port:
@@ -192,7 +193,11 @@ class PancakeDetector:
                     continue
 
                 # サイドごとに最大面積のパンケーキを記録
-                side = self._classify_side(center[0])
+                if center is not None:
+                    side = self._classify_side(center)
+                else:
+                    side = None
+                    
                 if side == "left":
                     self._update_side_data(side_data, "left", area, center)
                 elif side == "right":
@@ -209,7 +214,8 @@ class PancakeDetector:
 
             cv2.imshow(self.window_name, frame)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            self.key = cv2.waitKey(1) & 0xFF
+            if self.key == ord('q'):
                 break
 
         # 終了処理
@@ -223,15 +229,16 @@ class PancakeDetector:
             self.serial.close()
         cv2.destroyAllWindows()
 
-    def _classify_side(self, center_x: int) -> str:
+    def _classify_side(self, center: Tuple[int, int]) -> str:
         """入力されたx座標に基づいてパンケーキが左側にいるか右側にいるかを分類する。
 
         Args:
-            center_x (int): パンケーキの中心x座標
+            center (Tuple[int, int]): パンケーキの中心座標 (x, y)
 
         Returns:
             str: パンケーキの位置（"left"、"right"、"center"）
         """
+        center_x, center_y = center
         if center_x < self.left_boundary:
             return "left"
         if center_x > self.right_boundary:
@@ -283,11 +290,11 @@ class PancakeDetector:
         stop_due_to_area = False
         if self.target_area is not None and area > 0:
             stop_due_to_area = area >= self.target_area
-        key = cv2.waitKey(1) & 0xFF
+
 
         # 開始条件の評価
         # 2. キー入力による手動開始
-        if key in manual_mapping and manual_mapping[key] == side:
+        if self.key in manual_mapping and manual_mapping[self.key] == side:
             # 1. クールダウン時間が経過している
             self.last_center[side] = center
             cooldown_elapsed = now - self.last_trigger_ts[side] >= self.trigger_cooldown_s
