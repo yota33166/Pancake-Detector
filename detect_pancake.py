@@ -157,92 +157,94 @@ class PancakeDetector:
             "left": {"area": 0.0, "center": None},
             "right": {"area": 0.0, "center": None},
         }
-        recognizer = self.gesture_recognizer_runner.init_recognizer()
-        while True:
-            ret, frame = self.camera.read()
-            if not ret:
-                print("フレームの読み込みに失敗しました。")
-                break
+        try:
+            recognizer = self.gesture_recognizer_runner.init_recognizer()
+            while True:
+                ret, frame = self.camera.read()
+                if not ret:
+                    print("フレームの読み込みに失敗しました。")
+                    break
 
-            thresholds = self.ui.read_thresholds()
-            mask, hsv_frame, contours = self.frame_processor.detect_contours(
-                frame,
-                thresholds.lower,
-                thresholds.upper,
-            )
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-            recognizer.recognize_async(mp_image, int(time.time() * 1000))
-            self.gesture_recognizer_runner.render_overlay(frame)
+                thresholds = self.ui.read_thresholds()
+                mask, hsv_frame, contours = self.frame_processor.detect_contours(
+                    frame,
+                    thresholds.lower,
+                    thresholds.upper,
+                )
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+                recognizer.recognize_async(mp_image, int(time.time() * 1000))
+                self.gesture_recognizer_runner.render_overlay(frame)
 
-            now = time.time()
-            # サーボがアクティブでないサイドのデータを初期化
-            if not self.active_sides["left"]:
-                side_data["left"] = {"area": 0.0, "center": None}
-            if not self.active_sides["right"]:
-                side_data["right"] = {"area": 0.0, "center": None}
+                now = time.time()
+                # サーボがアクティブでないサイドのデータを初期化
+                if not self.active_sides["left"]:
+                    side_data["left"] = {"area": 0.0, "center": None}
+                if not self.active_sides["right"]:
+                    side_data["right"] = {"area": 0.0, "center": None}
 
-            for contour in contours:
-                area = cv2.contourArea(contour)
-                if area <= thresholds.min_area:
-                    continue
+                for contour in contours:
+                    area = cv2.contourArea(contour)
+                    if area <= thresholds.min_area:
+                        continue
 
-                x, y, w, h = cv2.boundingRect(contour)
-                center = (x + w // 2, y + h // 2)
+                    x, y, w, h = cv2.boundingRect(contour)
+                    center = (x + w // 2, y + h // 2)
 
-                mask_roi = mask[y:y + h, x:x + w]
-                hsv_roi = hsv_frame[y:y + h, x:x + w]
-                average_hsv = FrameProcessor.calculate_average_hsv(mask_roi, hsv_roi)
-                real_coords = self.camera.convert_to_real_coordinates(center)
+                    mask_roi = mask[y:y + h, x:x + w]
+                    hsv_roi = hsv_frame[y:y + h, x:x + w]
+                    average_hsv = FrameProcessor.calculate_average_hsv(mask_roi, hsv_roi)
+                    real_coords = self.camera.convert_to_real_coordinates(center)
 
-                self._draw_detection(frame, contour, center, average_hsv, real_coords)
+                    self._draw_detection(frame, contour, center, average_hsv, real_coords)
 
-                # シリアル通信でパンケーキの座標を送信
-                if self.serial and real_coords is not None:
-                    self.serial.send(f"({real_coords[0]:.3f}, {real_coords[1]:.3f})")
+                    # シリアル通信でパンケーキの座標を送信
+                    if self.serial and real_coords is not None:
+                        self.serial.send(f"({real_coords[0]:.3f}, {real_coords[1]:.3f})")
 
-                # トリガー領域内にあるか確認
-                if not self._is_within_trigger_region(center):
-                    continue
+                    # トリガー領域内にあるか確認
+                    if not self._is_within_trigger_region(center):
+                        continue
 
-                # サイドごとに最大面積のパンケーキを記録
-                if center is not None:
-                    side = self._classify_side(center)
-                else:
-                    side = None
-                    
-                if side == "left":
-                    self._update_side_data(side_data, "left", area, center)
-                elif side == "right":
-                    self._update_side_data(side_data, "right", area, center)
-                else:
-                    self._update_side_data(side_data, "left", area, center)
-                    self._update_side_data(side_data, "right", area, center)
+                    # サイドごとに最大面積のパンケーキを記録
+                    if center is not None:
+                        side = self._classify_side(center)
+                    else:
+                        side = None
+                        
+                    if side == "left":
+                        self._update_side_data(side_data, "left", area, center)
+                    elif side == "right":
+                        self._update_side_data(side_data, "right", area, center)
+                    else:
+                        self._update_side_data(side_data, "left", area, center)
+                        self._update_side_data(side_data, "right", area, center)
 
-            # 各サイドの評価とコマンド送信
-            for side in ("left", "right"):
-                area = side_data[side]["area"]
-                center = side_data[side]["center"]
-                self._evaluate_and_send_commands(side, area, center, now)
+                # 各サイドの評価とコマンド送信
+                for side in ("left", "right"):
+                    area = side_data[side]["area"]
+                    center = side_data[side]["center"]
+                    self._evaluate_and_send_commands(side, area, center, now)
 
-            cv2.imshow(self.window_name, frame)
+                cv2.imshow(self.window_name, frame)
 
-            self.key = cv2.waitKey(1) & 0xFF
-            if self.key == ord('q'):
-                break
+                self.key = cv2.waitKey(1) & 0xFF
+                if self.key == ord('q'):
+                    break
 
         # 終了処理
-        self.camera.release()
-        if recognizer:
-            recognizer.close()
-        if self.command_queue:
-            for side in ("left", "right"):
-                if self.active_sides[side]:
-                    self._send_command(f"stop_pour_{side}", reason="shutdown")
-                    self.active_sides[side] = False
-        if self.serial:
-            self.serial.close()
-        cv2.destroyAllWindows()
+        finally:
+            self.camera.release()
+            if recognizer:
+                recognizer.close()
+            if self.command_queue:
+                for side in ("left", "right"):
+                    if self.active_sides[side]:
+                        self._send_command(f"stop_pour_{side}", reason="shutdown")
+                        self.active_sides[side] = False
+            if self.serial:
+                self.serial.close()
+            cv2.destroyAllWindows()
 
     def _classify_side(self, center: Tuple[int, int]) -> str:
         """入力されたx座標に基づいてパンケーキが左側にいるか右側にいるかを分類する。
