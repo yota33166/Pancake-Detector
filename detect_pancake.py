@@ -269,23 +269,30 @@ class PancakeDetector:
         """サイドごとのパンケーキの状態を評価し、必要に応じてコマンドを送信する。
         
         - start_pour_(side) コマンドの送信条件:
-            1. 検出面積がMIN_CONTOUR_AREA以上である
-            2. クールダウン時間が経過している
+            1. クールダウン時間が経過している
+            2. キー入力（a: left, l: right）による手動開始
         - stop_pour_(side) コマンドの送信条件:
             1. 検出面積がtarget_areaを超えた場合
             （max_pour_time_s経過後に必ず停止する）
         """
+        manual_mapping = {
+            ord('a'): 'left',
+            ord('l'): 'right',
+        }
+        # 停止条件の評価（面積が閾値を超えたか）
+        stop_due_to_area = False
+        if self.target_area is not None and area > 0:
+            stop_due_to_area = area >= self.target_area
+        key = cv2.waitKey(1) & 0xFF
 
         # 開始条件の評価
-        # TODO 開始条件をserial通信の応答に基づいて拡張する
-        # 1. 検出面積がMIN_CONTOUR_AREA以上である
-        if area >= self.MIN_CONTOUR_AREA and center is not None:
-            # 2. クールダウン時間が経過している
+        # 2. キー入力による手動開始
+        if key in manual_mapping and manual_mapping[key] == side:
+            # 1. クールダウン時間が経過している
             self.last_center[side] = center
             cooldown_elapsed = now - self.last_trigger_ts[side] >= self.trigger_cooldown_s
-            # # 3. 目標面積未設定または検出面積が目標面積未満である
-            # area_below_target = self.target_area is None or area < self.target_area
-            if self.command_queue is not None and not self.active_sides[side] and cooldown_elapsed: # and area_below_target:
+
+            if not self.active_sides[side] and cooldown_elapsed and not stop_due_to_area: # and area_below_target:
                 self._send_command(
                     f"start_pour_{side}",
                     center=center,
@@ -297,11 +304,6 @@ class PancakeDetector:
         # activeでないサイドの場合は停止条件の評価をスキップ
         if not self.active_sides[side]:
             return
-
-        # 停止条件の評価（面積が閾値を超えたか）
-        stop_due_to_area = False
-        if self.target_area is not None and area > 0:
-            stop_due_to_area = area >= self.target_area
 
         if stop_due_to_area:
             stop_center = center or self.last_center[side]
