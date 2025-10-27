@@ -156,7 +156,9 @@ class PancakeDetector:
             "left": {"area": 0.0, "center": None},
             "right": {"area": 0.0, "center": None},
         }
+        detected_hand_gesture = "None"
         try:
+            # mediapipeジェスチャー認識器の初期化
             recognizer = self.gesture_recognizer_runner.init_recognizer()
             while True:
                 ret, frame = self.camera.read()
@@ -164,16 +166,22 @@ class PancakeDetector:
                     print("フレームの読み込みに失敗しました。")
                     break
 
+                # フレーム前処理
                 thresholds = self.ui.read_thresholds()
                 mask, hsv_frame, contours = self.frame_processor.detect_contours(
                     frame,
                     thresholds.lower,
                     thresholds.upper,
                 )
+                # Mediapipeジェスチャー認識
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
                 recognizer.recognize_async(mp_image, int(time.time() * 1000))
-                self.gesture_recognizer_runner.render_overlay(frame)
+                snapshot = self.gesture_recognizer_runner.latest_snapshot
+                if snapshot:
+                    detected_result = snapshot.top_category()
+                    detected_hand_gesture = detected_result.name if detected_result else "None"
+                    self.gesture_recognizer_runner.render_overlay(frame)
 
                 now = time.time()
                 # サーボがアクティブでないサイドのデータを初期化
@@ -223,7 +231,7 @@ class PancakeDetector:
                 for side in ("left", "right"):
                     area = side_data[side]["area"]
                     center = side_data[side]["center"]
-                    self._evaluate_and_send_commands(side, area, center, now)
+                    self._evaluate_and_send_commands(side, area, center, detected_hand_gesture, now)
 
                 cv2.imshow(self.window_name, frame)
 
@@ -287,6 +295,7 @@ class PancakeDetector:
         side: str,
         area: float,
         center: Optional[Tuple[int, int]],
+        detected_hand_gesture: str,
         now: float,
     ) -> None:
         """サイドごとのパンケーキの状態を評価し、必要に応じてコマンドを送信する。
@@ -294,6 +303,7 @@ class PancakeDetector:
         - start_pour_(side) コマンドの送信条件:
             1. クールダウン時間が経過している
             2. キー入力（a: left, l: right）による手動開始
+            3. ジェスチャー認識結果による開始
         - stop_pour_(side) コマンドの送信条件:
             1. 検出面積がtarget_areaを超えた場合
             （max_pour_time_s経過後に必ず停止する）
@@ -302,16 +312,25 @@ class PancakeDetector:
             ord('a'): 'left',
             ord('l'): 'right',
         }
+        gesture_mapping = {
+            "Pointing_Up": "left",
+            "Victory": "right",
+            "Open_Palm": "both",
+        }
         # 停止条件の評価（面積が閾値を超えたか）
         stop_due_to_area = False
         if self.target_area is not None and area > 0:
             stop_due_to_area = area >= self.target_area
 
-
         # 開始条件の評価
         # 2. キー入力による手動開始
-        # TODO : mediapipe_handsのジェスチャー認識結果を用いた開始条件の追加
-        if self.key in manual_mapping and manual_mapping[self.key] == side:
+        is_target_key_pressed = self.key in manual_mapping and manual_mapping[self.key] == side
+        # 3. mediapipe_handsのジェスチャー認識結果を用いた開始条件
+        is_gesture_start = False
+        if detected_hand_gesture in gesture_mapping:
+            is_gesture_start = gesture_mapping[detected_hand_gesture] == side
+
+        if is_target_key_pressed or is_gesture_start:
             # 1. クールダウン時間が経過している
             self.last_center[side] = center
             cooldown_elapsed = now - self.last_trigger_ts[side] >= self.trigger_cooldown_s
