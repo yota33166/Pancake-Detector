@@ -208,6 +208,8 @@ class GestureRecognizerRunner:
 		if not snapshot:
 			return
 
+		# zip_longestとは，要素数の異なるリストを結合する際に使う関数で，最長のリストに合わせて他のリストの不足分を埋める．
+		# これによって，ランドマークとカテゴリの数が異なる場合でもエラーを防ぎつつ描画できる．
 		for landmarks, category in zip_longest(snapshot.landmarks, snapshot.categories):
 			self._draw_hand_annotations(frame, landmarks, category)
 
