@@ -1,7 +1,7 @@
 import multiprocessing
 import sys
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import cv2
 import numpy as np
@@ -157,6 +157,7 @@ class PancakeDetector:
             "right": {"area": 0.0, "center": None},
         }
         detected_hand_gesture = "None"
+        recognizer = None
         try:
             # mediapipeジェスチャー認識器の初期化
             recognizer = self.gesture_recognizer_runner.init_recognizer()
@@ -182,6 +183,7 @@ class PancakeDetector:
                     detected_result = snapshot.top_category()
                     detected_hand_gesture = detected_result.name if detected_result else "None"
                     self.gesture_recognizer_runner.render_overlay(frame)
+                gesture_targets = self._resolve_gesture_targets(detected_hand_gesture)
 
                 now = time.time()
                 # サーボがアクティブでないサイドのデータを初期化
@@ -227,11 +229,15 @@ class PancakeDetector:
                         self._update_side_data(side_data, "left", area, center)
                         self._update_side_data(side_data, "right", area, center)
 
+                # 両側同時開始が必要であれば先に評価する
+                if gesture_targets == {"left", "right"}:
+                    self._attempt_dual_start(side_data, now)
+
                 # 各サイドの評価とコマンド送信
                 for side in ("left", "right"):
                     area = side_data[side]["area"]
                     center = side_data[side]["center"]
-                    self._evaluate_and_send_commands(side, area, center, detected_hand_gesture, now)
+                    self._evaluate_and_send_commands(side, area, center, gesture_targets, now)
 
                 cv2.imshow(self.window_name, frame)
 
@@ -279,7 +285,7 @@ class PancakeDetector:
 
     def _update_side_data(
         self,
-        side_data: Dict[str, Dict[str, float]],
+        side_data: Dict[str, Dict[str, object]],
         side: str,
         area: float,
         center: Tuple[int, int],
@@ -290,12 +296,68 @@ class PancakeDetector:
             side_data[side]["area"] = area
             side_data[side]["center"] = center
 
+    def _resolve_gesture_targets(self, gesture_name: str) -> Set[str]:
+        """ジェスチャー名から対象サイド集合を返す。"""
+
+        mapping = {
+            "Pointing_Up": {"left"},
+            "Victory": {"right"},
+            "Open_Palm": {"left", "right"},
+        }
+        return mapping.get(gesture_name, set())
+
+    def _attempt_dual_start(
+        self,
+        side_data: Dict[str, Dict[str, object]],
+        now: float,
+    ) -> None:
+        """"Open_Palm"ジェスチャー時に両側同時開始を試みる。"""
+
+        sides = ("left", "right")
+
+        # どちらか一方でも稼働中なら個別ロジックに任せる
+        if any(self.active_sides[side] for side in sides):
+            return
+
+        # クールダウン未経過であれば開始できない
+        cooldown_ready = all(
+            now - self.last_trigger_ts[side] >= self.trigger_cooldown_s for side in sides
+        )
+        if not cooldown_ready:
+            return
+
+        # 面積しきい値を超えている場合は同時開始を行わない
+        if self.target_area is not None:
+            for side in sides:
+                area = side_data[side].get("area", 0.0) or 0.0
+                if area > 0.0 and area >= self.target_area:
+                    return
+
+        # 中心座標を記録（Noneのままでもよい）
+        centers_payload: Dict[str, Optional[Tuple[int, int]]] = {}
+        areas_payload: Dict[str, float] = {}
+        for side in sides:
+            center = side_data[side].get("center")
+            area = float(side_data[side].get("area", 0.0) or 0.0)
+            self.last_center[side] = center
+            centers_payload[side] = center
+            areas_payload[side] = area
+
+        self._send_command(
+            "start_pour",
+            centers=centers_payload,
+            areas=areas_payload,
+        )
+        for side in sides:
+            self.active_sides[side] = True
+            self.last_trigger_ts[side] = now
+
     def _evaluate_and_send_commands(
         self,
         side: str,
         area: float,
         center: Optional[Tuple[int, int]],
-        detected_hand_gesture: str,
+        gesture_targets: Set[str],
         now: float,
     ) -> None:
         """サイドごとのパンケーキの状態を評価し、必要に応じてコマンドを送信する。
@@ -312,11 +374,6 @@ class PancakeDetector:
             ord('a'): 'left',
             ord('l'): 'right',
         }
-        gesture_mapping = {
-            "Pointing_Up": "left",
-            "Victory": "right",
-            "Open_Palm": "both",
-        }
         # 停止条件の評価（面積が閾値を超えたか）
         stop_due_to_area = False
         if self.target_area is not None and area > 0:
@@ -326,9 +383,7 @@ class PancakeDetector:
         # 2. キー入力による手動開始
         is_target_key_pressed = self.key in manual_mapping and manual_mapping[self.key] == side
         # 3. mediapipe_handsのジェスチャー認識結果を用いた開始条件
-        is_gesture_start = False
-        if detected_hand_gesture in gesture_mapping:
-            is_gesture_start = gesture_mapping[detected_hand_gesture] == side
+        is_gesture_start = side in gesture_targets
 
         if is_target_key_pressed or is_gesture_start:
             # 1. クールダウン時間が経過している
