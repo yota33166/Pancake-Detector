@@ -429,11 +429,9 @@ class ServoController:
 				logging.debug("Ignoring queue message in manual mode: %s", message)
 				continue
 			elif command == "start_pour":
-				self._start_pour_side("left", message)
-				self._start_pour_side("right", message)
+				self._start_pour_both(message)
 			elif command == "stop_pour":
-				self._stop_pour_side("left", message)
-				self._stop_pour_side("right", message)
+				self._stop_pour_both(message)
 			elif command in {"start_pour_left", "start_pour_right"}:
 				side = "left" if command.endswith("left") else "right"
 				self._start_pour_side(side, message)
@@ -441,11 +439,9 @@ class ServoController:
 				side = "left" if command.endswith("left") else "right"
 				self._stop_pour_side(side, message)
 			elif command == "start_pour_center":
-				self._start_pour_side("left", message)
-				self._start_pour_side("right", message)
+				self._start_pour_both(message)
 			elif command == "stop_pour_center":
-				self._stop_pour_side("left", message)
-				self._stop_pour_side("right", message)
+				self._stop_pour_both(message)
 			elif command == "trigger_pour":
 				logging.debug("Legacy trigger command received")
 				self._execute_pour_cycle()
@@ -604,6 +600,35 @@ class ServoController:
 		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
 		self.pour_hold_active[side] = True
 
+	def _start_pour_both(self, payload) -> None:
+		"""両サーボの注入を同時に開始する補助関数。"""
+
+		left_state = self.servo_states.get("left")
+		right_state = self.servo_states.get("right")
+		if left_state is None or right_state is None:
+			raise RuntimeError("Servos not initialised")
+
+		left_active = self.pour_hold_active.get("left", False)
+		right_active = self.pour_hold_active.get("right", False)
+
+		if left_active and right_active:
+			logging.debug("Both sides already pouring; ignoring start: %s", payload)
+			return
+
+		target_left = left_state.current_angle
+		target_right = right_state.current_angle
+		if not left_active:
+			target_left = self.motion.end_angle_left
+		if not right_active:
+			target_right = self.motion.end_angle_right
+
+		logging.debug("requested start to pour both: %s", payload)
+		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
+		if not left_active:
+			self.pour_hold_active["left"] = True
+		if not right_active:
+			self.pour_hold_active["right"] = True
+
 	def _stop_pour_side(self, side: str, payload) -> None:
 		"""キューでの指令を受けて指定されたサーボ側で注入を停止する。
 
@@ -634,6 +659,34 @@ class ServoController:
 
 		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
 		self.pour_hold_active[side] = False
+
+	def _stop_pour_both(self, payload) -> None:
+		"""両サーボの注入を同時に停止する補助関数。"""
+
+		left_state = self.servo_states.get("left")
+		right_state = self.servo_states.get("right")
+		if left_state is None or right_state is None:
+			raise RuntimeError("Servos not initialised")
+
+		left_active = self.pour_hold_active.get("left", False)
+		right_active = self.pour_hold_active.get("right", False)
+		if not left_active and not right_active:
+			logging.debug("Both sides already stopped; ignoring stop: %s", payload)
+			return
+
+		target_left = left_state.current_angle
+		target_right = right_state.current_angle
+		if left_active:
+			target_left = self.motion.start_angle_left
+		if right_active:
+			target_right = self.motion.start_angle_right
+
+		logging.debug("requested stop to pour both: %s", payload)
+		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
+		if left_active:
+			self.pour_hold_active["left"] = False
+		if right_active:
+			self.pour_hold_active["right"] = False
 
 
 
