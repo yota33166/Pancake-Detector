@@ -13,7 +13,7 @@ def run_camera(cmd_queue: Queue) -> None:
         fps=20,
         serial_port='ttyUSB0',
         command_queue=cmd_queue,
-        trigger_cooldown_s=1.5,
+        trigger_cooldown_s=3,
         max_pour_time_s=2.0,
     )
     detector.run()
