@@ -6,6 +6,7 @@ from typing import Dict, Optional, Set, Tuple
 import cv2
 import numpy as np
 import mediapipe as mp
+import tkinter as tk
 
 from detector.camera import CameraManager
 from detector.pipeline import FrameProcessor
@@ -156,6 +157,14 @@ class PancakeDetector:
             "left": {"area": 0.0, "center": None},
             "right": {"area": 0.0, "center": None},
         }
+        root = tk.Tk()
+        root.withdraw()  # ウィンドウを表示せずに処理だけ行う
+
+        # 画面の幅と高さを取得
+        max_screen_width = root.winfo_screenwidth()
+        max_screen_height = root.winfo_screenheight()
+        root.destroy()
+
         detected_hand_gesture = "None"
         recognizer = None
         try:
@@ -239,7 +248,8 @@ class PancakeDetector:
                     center = side_data[side]["center"]
                     self._evaluate_and_send_commands(side, area, center, gesture_targets, now)
 
-                cv2.imshow(self.window_name, frame)
+                frame_resized = cv2.resize(frame, (max_screen_width, max_screen_height), interpolation=cv2.INTER_NEAREST)
+                cv2.imshow(self.window_name, frame_resized)
 
                 self.key = cv2.waitKey(1) & 0xFF
                 if self.key == ord('q'):
