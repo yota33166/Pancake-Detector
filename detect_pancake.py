@@ -89,6 +89,7 @@ class PancakeDetector:
         self.last_trigger_ts: Dict[str, float] = {"left": 0.0, "right": 0.0}
         self.last_center: Dict[str, Optional[Tuple[int, int]]] = {"left": None, "right": None}
         self.key = -1
+        self.dual_session_active = False
 
         self.serial = None
         if serial_port:
@@ -253,10 +254,19 @@ class PancakeDetector:
                     self._attempt_dual_start(side_data, now)
 
                 # 各サイドの評価とコマンド送信
+                dual_area_candidates: Dict[str, Dict[str, object]] = {}
                 for side in ("left", "right"):
                     area = side_data[side]["area"]
                     center = side_data[side]["center"]
-                    self._evaluate_and_send_commands(side, area, center, gesture_targets, now)
+                    eval_result = self._evaluate_and_send_commands(side, area, center, gesture_targets, now)
+                    if self.dual_session_active and eval_result.get("area_stop"):
+                        dual_area_candidates[side] = {
+                            "center": eval_result.get("stop_center"),
+                            "area": eval_result.get("stop_area", 0.0),
+                        }
+
+                if self.dual_session_active and all(side in dual_area_candidates for side in ("left", "right")):
+                    self._finalize_dual_area_stop(dual_area_candidates)
 
                 frame_resized = cv2.resize(frame, (max_screen_width, max_screen_height), interpolation=cv2.INTER_NEAREST)
                 cv2.imshow(self.window_name, frame_resized)
@@ -371,6 +381,7 @@ class PancakeDetector:
         for side in sides:
             self.active_sides[side] = True
             self.last_trigger_ts[side] = now
+        self.dual_session_active = True
 
     def _evaluate_and_send_commands(
         self,
@@ -379,7 +390,7 @@ class PancakeDetector:
         center: Optional[Tuple[int, int]],
         gesture_targets: Set[str],
         now: float,
-    ) -> None:
+    ) -> Dict[str, object]:
         """サイドごとのパンケーキの状態を評価し、必要に応じてコマンドを送信する。
         
         - start_pour_(side) コマンドの送信条件:
@@ -390,6 +401,12 @@ class PancakeDetector:
             1. 検出面積がtarget_areaを超えた場合
             （max_pour_time_s経過後に必ず停止する）
         """
+        result: Dict[str, object] = {
+            "area_stop": False,
+            "time_stop": False,
+            "stop_center": None,
+            "stop_area": float(area),
+        }
         manual_mapping = {
             ord('a'): 'left',
             ord('l'): 'right',
@@ -421,18 +438,21 @@ class PancakeDetector:
 
         # activeでないサイドの場合は停止条件の評価をスキップ
         if not self.active_sides[side]:
-            return
+            return result
 
         if stop_due_to_area:
             stop_center = center or self.last_center[side]
-            self._send_command(
-                f"stop_pour_{side}",
-                center=stop_center,
-                area=area,
-                reason="area_threshold",
-            )
-            self.active_sides[side] = False
-            return
+            result["area_stop"] = True
+            result["stop_center"] = stop_center
+            if not self.dual_session_active:
+                self._send_command(
+                    f"stop_pour_{side}",
+                    center=stop_center,
+                    area=area,
+                    reason="area_threshold",
+                )
+                self.active_sides[side] = False
+            return result
 
         # max_pour_time_s経過後に必ず停止する
         if now - self.last_trigger_ts[side] >= self.max_pour_time_s:
@@ -443,7 +463,36 @@ class PancakeDetector:
                 reason="max_pour_time",
             )
             self.active_sides[side] = False
+            result["time_stop"] = True
+            result["stop_center"] = stop_center
+            if self.dual_session_active:
+                self.dual_session_active = False
+            return result
 
+        return result
+
+    def _finalize_dual_area_stop(self, area_candidates: Dict[str, Dict[str, object]]) -> None:
+        """両側同時開始セッションで両方が面積停止条件を満たした際に同時停止させる。"""
+
+        centers_payload: Dict[str, Optional[Tuple[int, int]]] = {}
+        areas_payload: Dict[str, float] = {}
+        for side in ("left", "right"):
+            candidate = area_candidates.get(side, {})
+            stop_center = candidate.get("center") or self.last_center[side]
+            stop_area = float(candidate.get("area", 0.0))
+            self.last_center[side] = stop_center
+            centers_payload[side] = stop_center
+            areas_payload[side] = stop_area
+            self.active_sides[side] = False
+
+        self._send_command(
+            "stop_pour",
+            centers=centers_payload,
+            areas=areas_payload,
+            reason="area_threshold",
+        )
+        self.dual_session_active = False
+        
     def _send_command(self, command: str, **payload) -> None:
         if self.command_queue is None:
             return
