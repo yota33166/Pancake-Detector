@@ -322,7 +322,7 @@ class PancakeDetector:
         mapping = {
             "Pointing_Up": {"left"},
             "Victory": {"right"},
-            "Open_Palm": {"left", "right"},
+            "Thumb_Up": {"left", "right"},
         }
         return mapping.get(gesture_name, set())
 
@@ -331,7 +331,7 @@ class PancakeDetector:
         side_data: Dict[str, Dict[str, object]],
         now: float,
     ) -> None:
-        """"Open_Palm"ジェスチャー時に両側同時開始を試みる。"""
+        """"Thumb_Up"ジェスチャー時に両側同時開始を試みる。"""
 
         sides = ("left", "right")
 
