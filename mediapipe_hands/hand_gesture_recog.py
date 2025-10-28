@@ -256,7 +256,7 @@ class GestureRecognizerRunner:
 			show_name = "Pour Left"
 		elif category.name == "Victory":
 			show_name = "Pour Right"
-		elif category.name == "Open_Palm":
+		elif category.name == "Thumb_Up":
 			show_name = "Pour Both"
 		else:
 			show_name = category.name
