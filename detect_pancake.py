@@ -41,6 +41,7 @@ class PancakeDetector:
         ):
         frame_size = (frame_width, frame_height)
         self.window_name = "PancakeDetector"
+        self.processing_interval_s = (1.0 / fps) if fps > 0 else 0.0
         self.frame_width = frame_width
         self.left_boundary = int(frame_width * 0.4)
         self.right_boundary = int(frame_width * 0.6)
@@ -170,11 +171,20 @@ class PancakeDetector:
         try:
             # mediapipeジェスチャー認識器の初期化
             recognizer = self.gesture_recognizer_runner.init_recognizer()
+            last_processed_ts = 0.0
             while True:
                 ret, frame = self.camera.read()
                 if not ret:
                     print("フレームの読み込みに失敗しました。")
                     break
+
+                now = time.time()
+                if self.processing_interval_s > 0.0 and (now - last_processed_ts) < self.processing_interval_s:
+                    self.key = cv2.waitKey(1) & 0xFF
+                    if self.key == ord('q'):
+                        break
+                    continue
+                last_processed_ts = now
 
                 # フレーム前処理
                 thresholds = self.ui.read_thresholds()
