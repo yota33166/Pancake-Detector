@@ -371,30 +371,25 @@ class ServoController:
 		if left_state is None or right_state is None:
 			raise RuntimeError("Servos not initialised")
 
+		# 目標角度を決定（両サーボ同時に動かす）
 		if button1_pressed:
-			# 両サーボをend側へ
-			if left_state.current_angle != self.motion.end_angle_left:
-				self._ensure_servo_position(left_state, self.motion.end_angle_left)
-			if right_state.current_angle != self.motion.end_angle_right:
-				self._ensure_servo_position(right_state, self.motion.end_angle_right)
+			# 両サーボendへ
+			left_target = self.motion.end_angle_left
+			right_target = self.motion.end_angle_right
 		elif button3_pressed:
 			# 左end、右start
-			if left_state.current_angle != self.motion.end_angle_left:
-				self._ensure_servo_position(left_state, self.motion.end_angle_left)
-			if right_state.current_angle != self.motion.start_angle_right:
-				self._ensure_servo_position(right_state, self.motion.start_angle_right)
+			left_target = self.motion.end_angle_left
+			right_target = self.motion.start_angle_right
 		elif button4_pressed:
 			# 左start、右end
-			if left_state.current_angle != self.motion.start_angle_left:
-				self._ensure_servo_position(left_state, self.motion.start_angle_left)
-			if right_state.current_angle != self.motion.end_angle_right:
-				self._ensure_servo_position(right_state, self.motion.end_angle_right)
+			left_target = self.motion.start_angle_left
+			right_target = self.motion.end_angle_right
 		else:
-			# 両サーボをstart側へ
-			if left_state.current_angle != self.motion.start_angle_left:
-				self._ensure_servo_position(left_state, self.motion.start_angle_left)
-			if right_state.current_angle != self.motion.start_angle_right:
-				self._ensure_servo_position(right_state, self.motion.start_angle_right)
+			# 両サーボstartへ
+			left_target = self.motion.start_angle_left
+			right_target = self.motion.start_angle_right
+
+		self._ensure_servos_position_both(left_target, right_target)
 
 	def _process_queue_messages(self, apply_commands: bool) -> bool:
 		"""キューからの保留中のメッセージを受け取り，必要に応じてサーボを制御する。
@@ -677,12 +672,11 @@ class ServoController:
 			logging.debug("Both sides already stopped; ignoring stop: %s", payload)
 			return
 
+		# 両サーボを同時にstart角へ
+		self._ensure_servos_position_both(self.motion.start_angle_left, self.motion.start_angle_right, force=True)
 		if left_active:
-			self._ensure_servo_position(left_state, left_state.start_angle, force=True)
 			self.pour_hold_active["left"] = False
-
 		if right_active:
-			self._ensure_servo_position(right_state, right_state.start_angle, force=True)
 			self.pour_hold_active["right"] = False
 
 	def _ensure_servo_position(self, state: ServoConfig, target_angle: int, retries: int = 3, settle_s: float = 0.05, *, force: bool = False) -> None:
@@ -715,6 +709,32 @@ class ServoController:
 				right_target = clamp(target_angle, 0, self.motion.max_angle)
 
 			logging.debug("ensure(%s) attempt %d -> %d° (other stays)", state.id, attempt, target_angle)
+			self._move_servos(left_target, right_target, self.motion.rotate_delay_ms)
+			time.sleep(settle_s)
+
+	def _ensure_servos_position_both(self, left_target: int, right_target: int, retries: int = 3, settle_s: float = 0.05, *, force: bool = False) -> None:
+		"""左右サーボを同時に目標角へ送る。_move_servosでdetatchを確実化。
+
+		Args:
+			left_target: 左サーボの論理目標角。
+			right_target: 右サーボの論理目標角。
+			retries: 再送回数。
+			settle_s: 各試行後の安定化待ち時間（秒）。
+			force: 現在角が一致していても再送する。
+		"""
+		left_state = self.servo_states.get("left")
+		right_state = self.servo_states.get("right")
+		if left_state is None or right_state is None:
+			raise RuntimeError("Servos not initialised")
+
+		left_target = clamp(left_target, 0, self.motion.max_angle)
+		right_target = clamp(right_target, 0, self.motion.max_angle)
+
+		if not force and left_state.current_angle == left_target and right_state.current_angle == right_target:
+			return
+
+		for attempt in range(1, retries + 1):
+			logging.debug("ensure(both) attempt %d -> L:%d°, R:%d°", attempt, left_target, right_target)
 			self._move_servos(left_target, right_target, self.motion.rotate_delay_ms)
 			time.sleep(settle_s)
 
