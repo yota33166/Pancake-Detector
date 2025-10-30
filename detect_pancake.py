@@ -387,6 +387,41 @@ class PancakeDetector:
                 if gesture_targets == {"left", "right"}:
                     self._attempt_dual_start(side_data, now)
 
+                # 両側同時停止: 同一フレームで両サイドが停止条件に到達したら同時停止コマンドを送る
+                combined_stop_handled = False
+                if self.active_sides["left"] and self.active_sides["right"]:
+                    # 面積停止条件の評価
+                    left_area = float(side_data["left"].get("area", 0.0) or 0.0)
+                    right_area = float(side_data["right"].get("area", 0.0) or 0.0)
+                    left_stop_area = (
+                        self.target_area is not None and left_area > 0.0 and left_area >= float(self.target_area)
+                    )
+                    right_stop_area = (
+                        self.target_area is not None and right_area > 0.0 and right_area >= float(self.target_area)
+                    )
+
+                    # タイムアウト停止条件の評価
+                    left_stop_timeout = (now - self.last_trigger_ts["left"]) >= self.max_pour_time_s
+                    right_stop_timeout = (now - self.last_trigger_ts["right"]) >= self.max_pour_time_s
+
+                    if (left_stop_area or left_stop_timeout) and (right_stop_area or right_stop_timeout):
+                        centers_payload = {
+                            "left": side_data["left"].get("center") or self.last_center["left"],
+                            "right": side_data["right"].get("center") or self.last_center["right"],
+                        }
+                        reasons_payload = {
+                            "left": "area_threshold" if left_stop_area else "max_pour_time",
+                            "right": "area_threshold" if right_stop_area else "max_pour_time",
+                        }
+                        self._send_command(
+                            "stop_pour",  # サーボ側では両停止として処理
+                            centers=centers_payload,
+                            reasons=reasons_payload,
+                        )
+                        self.active_sides["left"] = False
+                        self.active_sides["right"] = False
+                        combined_stop_handled = True
+
                 # 各サイドの評価とコマンド送信
                 for side in ("left", "right"):
                     area = side_data[side]["area"]
