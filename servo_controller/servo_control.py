@@ -644,20 +644,10 @@ class ServoController:
 			return
 
 		logging.debug("requested stop to pour %s: %s", side, payload)
-		left_state = self.servo_states.get("left")
-		right_state = self.servo_states.get("right")
-		if left_state is None or right_state is None:
-			raise RuntimeError("Servos not initialised")
+		state = self.servo_states[side]
+		target_angle = state.start_angle
 
-		target_left = left_state.current_angle
-		target_right = right_state.current_angle
-
-		if side == "left":
-			target_left = self.motion.start_angle_left
-		elif side == "right":
-			target_right = self.motion.start_angle_right
-
-		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
+		self._ensure_servo_position(state, target_angle)
 		self.pour_hold_active[side] = False
 
 	def _stop_pour_both(self, payload) -> None:
@@ -674,21 +664,31 @@ class ServoController:
 			logging.debug("Both sides already stopped; ignoring stop: %s", payload)
 			return
 
-		target_left = left_state.current_angle
-		target_right = right_state.current_angle
 		if left_active:
-			target_left = self.motion.start_angle_left
-		if right_active:
-			target_right = self.motion.start_angle_right
-
-		logging.debug("requested stop to pour both: %s", payload)
-		self._move_servos(target_left, target_right, self.motion.rotate_delay_ms)
-		if left_active:
+			self._ensure_servo_position(left_state, left_state.start_angle)
 			self.pour_hold_active["left"] = False
+
 		if right_active:
+			self._ensure_servo_position(right_state, right_state.start_angle)
 			self.pour_hold_active["right"] = False
 
+	def _ensure_servo_position(self, state: ServoConfig, target_angle: int, retries: int = 3) -> None:
+		"""Ensure the servo reaches the target angle by retrying if necessary.
 
+		Args:
+			state: The ServoConfig object for the servo.
+			target_angle: The desired angle to set the servo to.
+			retries: Number of retries to ensure the servo reaches the target angle.
+		"""
+		for attempt in range(retries):
+			self._apply_angle(state, target_angle)
+			time.sleep(0.1)  # Allow time for the servo to move
+			if state.servo.angle == target_angle:
+				logging.debug("Servo %s reached target angle %d° on attempt %d", state.id, target_angle, attempt + 1)
+				return
+			logging.warning("Servo %s did not reach target angle %d° on attempt %d", state.id, target_angle, attempt + 1)
+
+		logging.error("Servo %s failed to reach target angle %d° after %d retries", state.id, target_angle, retries)
 
 def run(command_queue: Optional[queue.Queue] = None) -> None:
     """制御ループをコマンドラインから実行するエントリポイント。もしキューが提供されれば、それを使用してコマンドを受信する。"""
