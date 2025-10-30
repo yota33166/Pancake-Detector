@@ -1,4 +1,5 @@
 import multiprocessing
+import os
 import sys
 import time
 from typing import Dict, Optional, Set, Tuple
@@ -13,6 +14,25 @@ from detector.pipeline import FrameProcessor
 from detector.ui import DetectorUI
 from mediapipe_hands.hand_gesture_recog import GestureRecognizerRunner
 from serial_handler import SerialHandler
+
+# import helpers from marker_calibration
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # app -> project root
+if BASE_DIR not in sys.path:
+    sys.path.append(BASE_DIR)
+try:
+    from marker_calibration.calib_marker_to_board import (
+        solve_pose_from_two_markers,
+        rvec_tvec_to_homogeneous,
+        project_uv_to_board_xy,
+        ARUCO_MARKER_LENGTH,
+        INTER_MARKER_OFFSET_MM,
+    )
+except Exception as _e:  # pragma: no cover - optional dependency at runtime
+    solve_pose_from_two_markers = None  # type: ignore
+    rvec_tvec_to_homogeneous = None  # type: ignore
+    project_uv_to_board_xy = None  # type: ignore
+    ARUCO_MARKER_LENGTH = 43
+    INTER_MARKER_OFFSET_MM = ARUCO_MARKER_LENGTH + 10.0
 
 
 class PancakeDetector:
@@ -38,6 +58,8 @@ class PancakeDetector:
         max_pour_time_s: float = 2.0, # 最大注ぎ時間
         # release_delay_s: float = 0.5, # 最低注ぎ継続時間
         trigger_area_threshold: Optional[float] = 5000.0,
+        board_transform_path: Optional[str] = None,
+        marker_hold_time_s: float = 0.75,
         ):
         frame_size = (frame_width, frame_height)
         self.window_name = "PancakeDetector"
@@ -99,6 +121,26 @@ class PancakeDetector:
                 print(f"シリアル通信の初期化に失敗しました: {exc}")
                 self.serial = None
 
+        # ArUco + transform setup
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_50)
+        self.target_marker_ids = {0, 1}
+        self.T_marker_to_board: Optional[np.ndarray] = None
+        # decide transform path
+        tf_default = os.path.join(BASE_DIR, 'T_marker_to_board.npy')
+        tf_path = board_transform_path or tf_default
+        try:
+            if os.path.exists(tf_path):
+                self.T_marker_to_board = np.load(tf_path)
+                print(f"Loaded T_marker_to_board: {tf_path}")
+            else:
+                print(f"警告: 変換行列が見つかりません（{tf_path}）。実座標への変換は無効です。")
+        except Exception as exc:
+            print(f"T_marker_to_board の読み込みに失敗: {exc}")
+            self.T_marker_to_board = None
+        self.T_cam_marker: Optional[np.ndarray] = None
+        self.last_marker_ts = 0.0
+        self.marker_hold_time_s = max(0.0, float(marker_hold_time_s))
+
     def _draw_detection(
         self,
         frame: np.ndarray,
@@ -106,6 +148,7 @@ class PancakeDetector:
         center: Tuple[int, int],
         average_hsv,
         real_coords,
+        real_area_mm2: Optional[float] = None,
     ) -> None:
         center_x, center_y = center
 
@@ -123,8 +166,11 @@ class PancakeDetector:
 
         # Build label and color
         if real_coords is not None:
-            text = f"World(Norm): ({real_coords[0]:.3f}, {real_coords[1]:.3f})"
-            text_color = (0, 255, 0)
+            if real_area_mm2 is not None and real_area_mm2 > 0:
+                text = f"Board(mm): ({real_coords[0]:.1f}, {real_coords[1]:.1f}), A={real_area_mm2:.0f} mm^2"
+            else:
+                text = f"Board(mm): ({real_coords[0]:.1f}, {real_coords[1]:.1f})"
+            text_color = (0, 255, 255)
         else:
             text = f"Pancake: ({center_x}, {center_y})"
             text_color = (141, 192, 177)
@@ -151,6 +197,46 @@ class PancakeDetector:
 
         cv2.circle(frame, center, 5, (0, 255, 0), -1)
         cv2.drawContours(frame, [contour], -1, (0, 255, 0), 2)
+
+    def _estimate_marker_pose(self, frame_bgr: np.ndarray) -> Optional[np.ndarray]:
+        """Estimate camera->marker pose using 2-marker PnP if available.
+        Returns T_cam_marker (4x4) with origin at ID0 center, else None.
+        """
+        if self.camera.camera_matrix is None or self.camera.dist_coeffs is None:
+            return None
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = cv2.aruco.detectMarkers(gray, self.aruco_dict)
+        if ids is None or len(ids) == 0:
+            return None
+        # filter to target ids
+        keep_idx = [i for i, mid in enumerate(ids.flatten()) if int(mid) in self.target_marker_ids]
+        if not keep_idx:
+            return None
+        filt_corners = [corners[i] for i in keep_idx]
+        filt_ids = ids[keep_idx]
+        # try two-marker PnP
+        if solve_pose_from_two_markers is not None and rvec_tvec_to_homogeneous is not None:
+            ok2, rvec, tvec = solve_pose_from_two_markers(
+                filt_corners, filt_ids, self.camera.camera_matrix, self.camera.dist_coeffs,
+                marker_len_mm=ARUCO_MARKER_LENGTH, inter_offset_mm=INTER_MARKER_OFFSET_MM,
+            )
+            if ok2 and rvec is not None and tvec is not None:
+                return rvec_tvec_to_homogeneous(rvec, tvec)
+        # fallback to first visible marker
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+            filt_corners, float(ARUCO_MARKER_LENGTH), self.camera.camera_matrix, self.camera.dist_coeffs
+        )
+        if rvecs is None or len(rvecs) == 0 or rvec_tvec_to_homogeneous is None:
+            return None
+        return rvec_tvec_to_homogeneous(rvecs[0], tvecs[0])
+
+    @staticmethod
+    def _polygon_area_mm2(xy: np.ndarray) -> float:
+        if xy is None or len(xy) < 3:
+            return 0.0
+        x = xy[:, 0]
+        y = xy[:, 1]
+        return float(0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
 
 
     def run(self) -> None:
@@ -185,6 +271,17 @@ class PancakeDetector:
                         break
                     continue
                 last_processed_ts = now
+
+                # Estimate marker pose for this frame (if transform available)
+                if self.T_marker_to_board is not None:
+                    T = self._estimate_marker_pose(frame)
+                    if T is not None:
+                        self.T_cam_marker = T
+                        self.last_marker_ts = now
+                    else:
+                        # hold last pose for short duration, then invalidate
+                        if self.T_cam_marker is not None and (now - self.last_marker_ts) > self.marker_hold_time_s:
+                            self.T_cam_marker = None
 
                 # フレーム前処理
                 thresholds = self.ui.read_thresholds()
@@ -222,11 +319,45 @@ class PancakeDetector:
                     mask_roi = mask[y:y + h, x:x + w]
                     hsv_roi = hsv_frame[y:y + h, x:x + w]
                     average_hsv = FrameProcessor.calculate_average_hsv(mask_roi, hsv_roi)
-                    real_coords = self.camera.convert_to_real_coordinates(center)
+                    real_coords = None
+                    real_area_mm2 = None
+                    # Project to board coordinates if possible
+                    if (
+                        self.T_marker_to_board is not None and
+                        self.T_cam_marker is not None and
+                        project_uv_to_board_xy is not None and
+                        self.camera.camera_matrix is not None and
+                        self.camera.dist_coeffs is not None
+                    ):
+                        try:
+                            xy = project_uv_to_board_xy(
+                                np.array(center, dtype=np.float32),
+                                self.camera.camera_matrix,
+                                self.camera.dist_coeffs,
+                                self.T_cam_marker,
+                                self.T_marker_to_board,
+                            )
+                            real_coords = (float(xy[0, 0]), float(xy[0, 1]))
+                            # area: project contour polygon and compute area
+                            pts = contour.reshape(-1, 2).astype(np.float32)
+                            xy_poly = project_uv_to_board_xy(
+                                pts,
+                                self.camera.camera_matrix,
+                                self.camera.dist_coeffs,
+                                self.T_cam_marker,
+                                self.T_marker_to_board,
+                            )
+                            real_area_mm2 = self._polygon_area_mm2(xy_poly)
+                        except Exception as exc:
+                            # fallback to normalized coords if projection fails
+                            real_coords = self.camera.convert_to_real_coordinates(center)
+                            real_area_mm2 = None
+                    else:
+                        real_coords = self.camera.convert_to_real_coordinates(center)
 
-                    self._draw_detection(frame, contour, center, average_hsv, real_coords)
+                    self._draw_detection(frame, contour, center, average_hsv, real_coords, real_area_mm2)
 
-                    # シリアル通信でパンケーキの座標を送信
+                    # シリアル通信でパンケーキの座標を送信（ボード座標が得られた場合はそれを送る）
                     if self.serial and real_coords is not None:
                         self.serial.send(f"({real_coords[0]:.3f}, {real_coords[1]:.3f})")
 
@@ -239,7 +370,11 @@ class PancakeDetector:
                         side = self._classify_side(center)
                     else:
                         side = None
-                        
+
+                    # 面積を更新
+                    if real_area_mm2 is not None:
+                        area = real_area_mm2
+                    
                     if side == "left":
                         self._update_side_data(side_data, "left", area, center)
                     elif side == "right":
