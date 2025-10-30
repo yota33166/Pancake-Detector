@@ -672,23 +672,35 @@ class ServoController:
 			self._ensure_servo_position(right_state, right_state.start_angle)
 			self.pour_hold_active["right"] = False
 
-	def _ensure_servo_position(self, state: ServoConfig, target_angle: int, retries: int = 3) -> None:
-		"""Ensure the servo reaches the target angle by retrying if necessary.
+	def _ensure_servo_position(self, state: ServoConfig, target_angle: int, retries: int = 3, settle_s: float = 0.05) -> None:
+		"""Try to bring the specified servo to target angle using _move_servos.
+
+		Note:
+		- We can't read actual servo feedback, so we avoid comparing physical angles.
+		- We use _move_servos so that the "finally" block detaches PWM and prevents jitter.
 
 		Args:
-			state: The ServoConfig object for the servo.
-			target_angle: The desired angle to set the servo to.
-			retries: Number of retries to ensure the servo reaches the target angle.
+			state: 対象サーボの設定/状態。
+			target_angle: 論理角度での目標位置。
+			retries: 再送回数（同じコマンドを重ねて送る）。
+			settle_s: 各試行後の安定化待ち時間（秒）。
 		"""
-		for attempt in range(retries):
-			self._apply_angle(state, target_angle)
-			time.sleep(0.1)  # Allow time for the servo to move
-			if state.servo.angle == target_angle:
-				logging.debug("Servo %s reached target angle %d° on attempt %d", state.id, target_angle, attempt + 1)
-				return
-			logging.warning("Servo %s did not reach target angle %d° on attempt %d", state.id, target_angle, attempt + 1)
+		other_id = "right" if state.id == "left" else "left"
+		other_state = self.servo_states.get(other_id)
 
-		logging.error("Servo %s failed to reach target angle %d° after %d retries", state.id, target_angle, retries)
+		for attempt in range(1, retries + 1):
+			# 片側のみを動かす。もう一方は現在角度を維持する。
+			if state.id == "left":
+				left_target = clamp(target_angle, 0, self.motion.max_angle)
+				right_target = other_state.current_angle if other_state is not None else self.motion.start_angle_right
+			else:
+				left_state = self.servo_states.get("left")
+				left_target = left_state.current_angle if left_state is not None else self.motion.start_angle_left
+				right_target = clamp(target_angle, 0, self.motion.max_angle)
+
+			logging.debug("ensure(%s) attempt %d -> %d° (other stays)", state.id, attempt, target_angle)
+			self._move_servos(left_target, right_target, self.motion.rotate_delay_ms)
+			time.sleep(settle_s)
 
 def run(command_queue: Optional[queue.Queue] = None) -> None:
     """制御ループをコマンドラインから実行するエントリポイント。もしキューが提供されれば、それを使用してコマンドを受信する。"""
