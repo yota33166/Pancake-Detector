@@ -96,7 +96,15 @@ class PancakeDetector:
         )
 
         self.command_queue = command_queue
-        self.trigger_region = trigger_region
+        # 検知領域の初期化: Noneの場合は「下半分の中央付近」(x:35%-65%, y:50%-100%) に制限
+        if trigger_region is None:
+            x_min = int(frame_width * 0.35)
+            x_max = int(frame_width * 0.65)
+            y_min = int(frame_height * 0.50)
+            y_max = frame_height - 1
+            self.trigger_region = (x_min, x_max, y_min, y_max)
+        else:
+            self.trigger_region = trigger_region
         self.trigger_cooldown_s = max(0.0, trigger_cooldown_s)
         # self.release_delay_s = max(0.0, release_delay_s)
         self.max_pour_time_s = max_pour_time_s
@@ -290,6 +298,13 @@ class PancakeDetector:
                     thresholds.lower,
                     thresholds.upper,
                 )
+                # パンケーキ検知は trigger_region で限定。ハンドジェスチャーはフルフレームで実施。
+                # 視覚化のために検知領域を描画
+                if self.trigger_region is not None:
+                    x_min, x_max, y_min, y_max = self.trigger_region
+                    cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (60, 180, 255), 2)
+                    cv2.putText(frame, "Pancake ROI", (x_min + 5, max(y_min - 8, 15)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (60, 180, 255), 1, cv2.LINE_AA)
                 # Mediapipeジェスチャー認識
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
